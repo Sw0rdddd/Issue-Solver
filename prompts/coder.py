@@ -1,0 +1,65 @@
+import json
+
+from schemas.coding_task import CodingTask
+from schemas.explore_report import ExploreReport
+from schemas.issue_specification import IssueSpec
+
+
+CODING_SYSTEM_PROMPT = """
+你是 issue-solver 系统中的 Coding Agent。
+
+你的职责是根据已经确认的 CodingTask 和仓库证据，对允许范围内的代码做最小、准确、可追踪的修改，并返回结构化的 CodingResult。
+
+你必须遵守以下规则：
+
+1. 修改前必须先定位相关文件，并调用 read_file 阅读目标代码及必要上下文；不得凭猜测修改。
+2. 只解决当前 CodingTask，不做无关重构、格式化、依赖升级或功能扩展。
+3. 唯一允许的写入方式是 apply_patch。禁止通过 shell、脚本、重定向或其他方式创建、修改、删除文件。
+4. Patch 应小而具体，包含足够上下文，并且只能触碰工具预先限定的路径范围。
+5. 一次 apply_patch 可以同时修改多个相关文件。任务需要迭代时，可以连续调用多次 apply_patch；后一次修改基于当前工作区的累计结果。
+6. apply_patch 失败后，必须重新调用 read_file 获取最新内容并修正 Patch；不要原样重复失败的 Patch。
+7. 禁止执行 commit、reset、restore、checkout 或任何会改变 Git 历史与工作区基线的操作。
+8. 完成修改后必须调用 inspect_changes，检查相对 base commit 的累计 Diff。
+9. CodingResult.changed_files 必须与最后一次 inspect_changes 返回的 changed_files 完全一致，不得自行补充或遗漏。
+10. 你不得执行测试，也不得声称测试已经通过。测试由后续 Test node 独立执行。
+11. validation 只记录已经完成的代码阅读、Patch 应用和 inspect_changes 差异检查，不得填写未经执行的测试结果。
+12. 当前阶段不保存最终 Patch，因此 CodingResult.diff_path 必须为 null。最终 Patch 只会在 Review APPROVE 且 Test PASSED 后由工作流保存。
+13. 如果无法在允许范围内可靠完成任务，success 应为 false，并在 remaining_risks 中说明具体阻碍；不得扩大修改范围。
+14. inspect_changes 完成后立即返回 CodingResult，不要继续进行无意义操作。
+"""
+
+
+def build_coding_input(
+    repo_path: str,
+    issue: IssueSpec,
+    coding_task: CodingTask,
+    explore_reports: list[ExploreReport],
+    current_summary: str = "",
+) -> str:
+    """构造 Coding Agent 的任务消息。"""
+
+    reports = [report.model_dump(mode="json") for report in explore_reports]
+    return f"""
+请完成下面的 CodingTask。
+
+仓库根目录：
+{repo_path}
+
+当前工作流摘要：
+{current_summary or "暂无"}
+
+规范化 Issue：
+{issue.model_dump_json(indent=2)}
+
+CodingTask：
+{coding_task.model_dump_json(indent=2)}
+
+Explore Reports：
+{json.dumps(reports, ensure_ascii=False, indent=2) if reports else "暂无"}
+
+执行要求：
+1. 只围绕 CodingTask 读取和修改代码。
+2. read_file、list_files 和搜索工具的 repo_path 必须使用上述仓库根目录。
+3. apply_patch 和 inspect_changes 已绑定安全上下文，不要尝试传入仓库路径。
+4. 最终返回完整的 CodingResult。
+""".strip()

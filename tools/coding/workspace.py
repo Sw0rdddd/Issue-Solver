@@ -1,0 +1,819 @@
+import hashlib
+import json
+import os
+import re
+import stat
+import subprocess
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+from typing import Any
+
+from langchain.tools import tool
+
+from tools.coding.models import (
+    DEFAULT_PROTECTED_NAMES,
+    CodingToolContext,
+    CodingToolResult,
+    tool_failure,
+    tool_success,
+)
+
+
+MAX_PATCH_CHARS = 100_000
+MAX_CHANGED_FILES = 20
+MAX_FILE_BYTES = 1_048_576
+MAX_DIFF_PREVIEW_CHARS = 20_000
+
+
+@dataclass(frozen=True)
+class _PathState:
+    relative_path: str
+    existed: bool
+    content: bytes | None
+    mode: int | None
+
+
+@dataclass(frozen=True)
+class _ChangeSnapshot:
+    diff: str
+    changed_files: list[str]
+    changes: list[dict[str, Any]]
+
+
+def _run_git_bytes(
+    context: CodingToolContext,
+    args: list[str],
+    *,
+    input_bytes: bytes | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=context.repo_root,
+            input=input_bytes,
+            capture_output=True,
+            timeout=30,
+            check=False,
+            env=env,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("未找到 Git。") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("Git 命令执行超时。") from exc
+
+
+def _git_error(result: subprocess.CompletedProcess[bytes]) -> str:
+    return result.stderr.decode("utf-8", errors="replace").strip() or "未知 Git 错误"
+
+
+def _normalized_relative_path(value: str) -> str:
+    normalized = value.replace("\\", "/")
+    path = PurePosixPath(normalized)
+    if (
+        not normalized
+        or normalized.startswith("/")
+        or (len(normalized) >= 2 and normalized[0].isalpha() and normalized[1] == ":")
+        or ".." in path.parts
+    ):
+        raise ValueError(f"Patch 包含仓库外或无效路径：{value}")
+    return path.as_posix()
+
+
+def _matches_scope(path: str, scope: str) -> bool:
+    if scope.endswith("/"):
+        directory = scope[:-1]
+        return path == directory or path.startswith(scope)
+    return path == scope
+
+
+def _validate_scoped_path(context: CodingToolContext, value: str) -> str:
+    relative = _normalized_relative_path(value)
+    parts = PurePosixPath(relative).parts
+
+    if any(part in DEFAULT_PROTECTED_NAMES for part in parts) or any(
+        _matches_scope(relative, scope) for scope in context.protected_paths
+    ):
+        raise ValueError(f"Patch 触碰受保护路径：{relative}")
+
+    if not any(
+        _matches_scope(relative, scope) for scope in context.allowed_paths
+    ):
+        raise ValueError(f"Patch 路径超出允许修改范围：{relative}")
+
+    current = context.repo_root
+    for part in parts:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError(f"禁止修改符号链接或其后代：{relative}")
+
+    target = (context.repo_root / Path(*parts)).resolve(strict=False)
+    try:
+        target.relative_to(context.repo_root)
+    except ValueError as exc:
+        raise ValueError(f"Patch 路径解析到仓库之外：{relative}") from exc
+
+    return relative
+
+
+def _parse_numstat(data: bytes) -> list[tuple[str, ...]]:
+    records: list[tuple[str, ...]] = []
+    position = 0
+
+    while position < len(data):
+        first_tab = data.find(b"\t", position)
+        second_tab = data.find(b"\t", first_tab + 1)
+        end = data.find(b"\0", second_tab + 1)
+        if first_tab < 0 or second_tab < 0 or end < 0:
+            raise ValueError("无法解析 Patch 文件统计。")
+
+        additions = data[position:first_tab]
+        deletions = data[first_tab + 1:second_tab]
+        if additions == b"-" or deletions == b"-":
+            raise ValueError("禁止应用二进制 Patch。")
+
+        first_path = data[second_tab + 1:end]
+        position = end + 1
+        if first_path:
+            records.append((first_path.decode("utf-8"),))
+            continue
+
+        old_end = data.find(b"\0", position)
+        new_end = data.find(b"\0", old_end + 1)
+        if old_end < 0 or new_end < 0:
+            raise ValueError("无法解析 Patch 重命名路径。")
+        old_path = data[position:old_end].decode("utf-8")
+        new_path = data[old_end + 1:new_end].decode("utf-8")
+        records.append((old_path, new_path))
+        position = new_end + 1
+
+    return records
+
+
+def _extract_patch_paths(
+    context: CodingToolContext,
+    patch_bytes: bytes,
+) -> list[str]:
+    result = _run_git_bytes(
+        context,
+        ["apply", "--numstat", "-z", "--recount", "-"],
+        input_bytes=patch_bytes,
+    )
+    if result.returncode != 0:
+        raise ValueError(f"Patch 格式无效：{_git_error(result)}")
+
+    paths = sorted(
+        {
+            _validate_scoped_path(context, path)
+            for record in _parse_numstat(result.stdout)
+            for path in record
+        }
+    )
+    if not paths:
+        raise ValueError("Patch 未包含任何文件修改。")
+    if len(paths) > MAX_CHANGED_FILES:
+        raise ValueError(
+            f"单次 Patch 最多触碰 {MAX_CHANGED_FILES} 个文件。"
+        )
+    return paths
+
+
+def _validate_patch_headers(patch: str) -> None:
+    if not patch.strip():
+        raise ValueError("Patch 不能为空。")
+    if len(patch) > MAX_PATCH_CHARS:
+        raise ValueError(f"Patch 不能超过 {MAX_PATCH_CHARS} 个字符。")
+    if "\x00" in patch:
+        raise ValueError("Patch 不能包含 NUL 字符。")
+    if "GIT binary patch" in patch or "Binary files " in patch:
+        raise ValueError("禁止应用二进制 Patch。")
+    if "Subproject commit " in patch:
+        raise ValueError("禁止修改 Git submodule。")
+    if re.search(r"^(old mode|new mode) ", patch, re.MULTILINE):
+        raise ValueError("禁止修改文件权限或文件类型。")
+
+    for header, mode in re.findall(
+        r"^(new file mode|deleted file mode) (\d+)$",
+        patch,
+        re.MULTILINE,
+    ):
+        if mode in {"120000", "160000"}:
+            raise ValueError("禁止修改符号链接或 Git submodule。")
+        if header == "new file mode" and mode != "100644":
+            raise ValueError("新文件必须是普通 UTF-8 文本文件。")
+        if header == "deleted file mode" and mode not in {"100644", "100755"}:
+            raise ValueError("只能删除普通文本文件。")
+
+
+def _validate_existing_file(path: Path, relative: str) -> None:
+    if path.is_symlink():
+        raise ValueError(f"禁止修改符号链接：{relative}")
+    if not path.is_file():
+        raise ValueError(f"修改目标不是普通文件：{relative}")
+    if path.stat().st_size > MAX_FILE_BYTES:
+        raise ValueError(f"文件超过 {MAX_FILE_BYTES} 字节限制：{relative}")
+    try:
+        path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"文件不是有效 UTF-8 文本：{relative}") from exc
+    except OSError as exc:
+        raise ValueError(f"无法读取文件：{relative}：{exc}") from exc
+
+
+def _capture_path_states(
+    context: CodingToolContext,
+    paths: list[str],
+) -> list[_PathState]:
+    states: list[_PathState] = []
+    for relative in paths:
+        target = context.repo_root / Path(*PurePosixPath(relative).parts)
+        if not target.exists() and not target.is_symlink():
+            states.append(_PathState(relative, False, None, None))
+            continue
+        _validate_existing_file(target, relative)
+        states.append(
+            _PathState(
+                relative,
+                True,
+                target.read_bytes(),
+                stat.S_IMODE(target.stat().st_mode),
+            )
+        )
+    return states
+
+
+def _reject_ignored_new_paths(
+    context: CodingToolContext,
+    states: list[_PathState],
+) -> None:
+    for state_item in states:
+        if state_item.existed:
+            continue
+        result = _run_git_bytes(
+            context,
+            [
+                "check-ignore",
+                "--quiet",
+                "--no-index",
+                "--",
+                state_item.relative_path,
+            ],
+        )
+        if result.returncode == 0:
+            raise ValueError(
+                f"禁止创建被 Git 忽略的新文件：{state_item.relative_path}"
+            )
+        if result.returncode != 1:
+            raise RuntimeError(
+                f"无法检查 Git 忽略规则：{_git_error(result)}"
+            )
+
+
+def _remove_empty_parents(path: Path, repo_root: Path) -> None:
+    current = path.parent
+    while current != repo_root:
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
+
+
+def _restore_path_states(
+    context: CodingToolContext,
+    states: list[_PathState],
+) -> None:
+    for state_item in states:
+        if state_item.existed:
+            continue
+        target = context.repo_root / Path(
+            *PurePosixPath(state_item.relative_path).parts
+        )
+        if target.is_symlink() or target.is_file():
+            target.unlink()
+            _remove_empty_parents(target, context.repo_root)
+
+    for state_item in states:
+        if not state_item.existed:
+            continue
+        target = context.repo_root / Path(
+            *PurePosixPath(state_item.relative_path).parts
+        )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(state_item.content or b"")
+        if state_item.mode is not None:
+            target.chmod(state_item.mode)
+
+
+def _temporary_index_environment(
+    context: CodingToolContext,
+    directory: str,
+) -> dict[str, str]:
+    env = os.environ.copy()
+    env["GIT_INDEX_FILE"] = str(Path(directory) / "index")
+    return env
+
+
+def _parse_name_status(data: bytes) -> tuple[list[str], list[dict[str, Any]]]:
+    fields = data.split(b"\0")
+    if fields and fields[-1] == b"":
+        fields.pop()
+    changed: set[str] = set()
+    changes: list[dict[str, Any]] = []
+    index = 0
+
+    while index < len(fields):
+        status_value = fields[index].decode("ascii")
+        index += 1
+        status_code = status_value[0]
+        if status_code in {"R", "C"}:
+            old_path = fields[index].decode("utf-8")
+            new_path = fields[index + 1].decode("utf-8")
+            index += 2
+            changed.update((old_path, new_path))
+            changes.append(
+                {
+                    "status": status_code,
+                    "old_path": old_path,
+                    "new_path": new_path,
+                }
+            )
+        else:
+            path = fields[index].decode("utf-8")
+            index += 1
+            changed.add(path)
+            changes.append({"status": status_code, "path": path})
+
+    return sorted(changed), changes
+
+
+def _capture_changes(
+    context: CodingToolContext,
+    *,
+    enforce_scope: bool = True,
+    enforce_text: bool = True,
+) -> _ChangeSnapshot:
+    with tempfile.TemporaryDirectory(dir=context.run_dir) as temporary:
+        env = _temporary_index_environment(context, temporary)
+        read_tree = _run_git_bytes(
+            context,
+            ["read-tree", context.base_commit],
+            env=env,
+        )
+        if read_tree.returncode != 0:
+            raise RuntimeError(f"无法创建临时 Git index：{_git_error(read_tree)}")
+
+        add = _run_git_bytes(context, ["add", "-A", "--", "."], env=env)
+        if add.returncode != 0:
+            raise RuntimeError(f"无法构建工作区快照：{_git_error(add)}")
+
+        status = _run_git_bytes(
+            context,
+            [
+                "diff",
+                "--cached",
+                "--name-status",
+                "-z",
+                "--find-renames",
+                context.base_commit,
+                "--",
+            ],
+            env=env,
+        )
+        if status.returncode != 0:
+            raise RuntimeError(f"无法读取修改文件：{_git_error(status)}")
+
+        diff = _run_git_bytes(
+            context,
+            [
+                "diff",
+                "--cached",
+                "--binary",
+                "--full-index",
+                "--find-renames",
+                "--no-ext-diff",
+                context.base_commit,
+                "--",
+            ],
+            env=env,
+        )
+        if diff.returncode != 0:
+            raise RuntimeError(f"无法生成累计 Diff：{_git_error(diff)}")
+
+    changed_files, changes = _parse_name_status(status.stdout)
+    for relative in changed_files:
+        if enforce_scope:
+            _validate_scoped_path(context, relative)
+        else:
+            _normalized_relative_path(relative)
+        target = context.repo_root / Path(*PurePosixPath(relative).parts)
+        if enforce_text and (target.exists() or target.is_symlink()):
+            _validate_existing_file(target, relative)
+
+    return _ChangeSnapshot(
+        diff=diff.stdout.decode("utf-8", errors="strict"),
+        changed_files=changed_files,
+        changes=changes,
+    )
+
+
+def _check_patch_applies(
+    context: CodingToolContext,
+    patch_bytes: bytes,
+) -> None:
+    result = _run_git_bytes(
+        context,
+        ["apply", "--check", "--recount", "--whitespace=nowarn", "-"],
+        input_bytes=patch_bytes,
+    )
+    if result.returncode != 0:
+        raise ValueError(f"Patch 无法应用：{_git_error(result)}")
+
+
+def _coding_audit_path(context: CodingToolContext) -> Path:
+    return context.run_dir / (
+        f"coding_audit_r{context.repair_round:02d}_"
+        f"s{context.stage_call:02d}.jsonl"
+    )
+
+
+def get_coding_iteration_count(context: CodingToolContext) -> int:
+    """返回本次 Coding 阶段已经调用 apply_patch 的次数。"""
+
+    path = _coding_audit_path(context)
+    if not path.exists():
+        return 0
+    return sum(
+        1 for line in path.read_text(encoding="utf-8").splitlines() if line
+    )
+
+
+def _append_audit(context: CodingToolContext, entry: dict[str, Any]) -> int:
+    path = _coding_audit_path(context)
+    call_number = get_coding_iteration_count(context) + 1
+    entry = {
+        "repair_round": context.repair_round,
+        "stage_call": context.stage_call,
+        "index": call_number,
+        **entry,
+    }
+    with path.open("a", encoding="utf-8", newline="\n") as stream:
+        stream.write(json.dumps(entry, ensure_ascii=False, sort_keys=True))
+        stream.write("\n")
+    return call_number
+
+
+def _apply_patch(
+    context: CodingToolContext,
+    patch: str,
+) -> CodingToolResult:
+    input_sha256 = hashlib.sha256(patch.encode("utf-8")).hexdigest()
+    path_states: list[_PathState] = []
+    applied = False
+    touched_files: list[str] = []
+
+    try:
+        _validate_patch_headers(patch)
+        patch_bytes = patch.encode("utf-8")
+        touched_files = _extract_patch_paths(context, patch_bytes)
+        path_states = _capture_path_states(context, touched_files)
+        _reject_ignored_new_paths(context, path_states)
+        _check_patch_applies(context, patch_bytes)
+
+        result = _run_git_bytes(
+            context,
+            ["apply", "--recount", "--whitespace=nowarn", "-"],
+            input_bytes=patch_bytes,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Patch 应用失败：{_git_error(result)}")
+        applied = True
+
+        for relative in touched_files:
+            target = context.repo_root / Path(*PurePosixPath(relative).parts)
+            if target.exists() or target.is_symlink():
+                _validate_existing_file(target, relative)
+
+        snapshot = _capture_changes(context)
+        cumulative_hash = hashlib.sha256(
+            snapshot.diff.encode("utf-8")
+        ).hexdigest()
+        iteration = _append_audit(
+            context,
+            {
+                "success": True,
+                "touched_files": touched_files,
+                "changed_files": snapshot.changed_files,
+                "input_sha256": input_sha256,
+                "cumulative_diff_sha256": cumulative_hash,
+                "error": None,
+            },
+        )
+        return tool_success(
+            f"Patch 已应用，累计修改 {len(snapshot.changed_files)} 个文件。",
+            {
+                "touched_files": touched_files,
+                "changed_files": snapshot.changed_files,
+                "cumulative_diff_sha256": cumulative_hash,
+                "iteration": iteration,
+            },
+        )
+    except Exception as exc:
+        if applied:
+            try:
+                _restore_path_states(context, path_states)
+            except Exception as restore_exc:
+                error = f"{exc}；恢复本次修改失败：{restore_exc}"
+            else:
+                error = str(exc)
+        else:
+            error = str(exc)
+        try:
+            _append_audit(
+                context,
+                {
+                    "success": False,
+                    "touched_files": touched_files,
+                    "changed_files": [],
+                    "input_sha256": input_sha256,
+                    "cumulative_diff_sha256": None,
+                    "error": error,
+                },
+            )
+        except Exception as audit_exc:
+            error = f"{error}；记录 Coding 审计失败：{audit_exc}"
+        return tool_failure(error)
+
+
+def _inspect_changes(context: CodingToolContext) -> CodingToolResult:
+    try:
+        snapshot = _capture_changes(context)
+        preview = snapshot.diff[:MAX_DIFF_PREVIEW_CHARS]
+        truncated = len(snapshot.diff) > MAX_DIFF_PREVIEW_CHARS
+        return tool_success(
+            f"检测到 {len(snapshot.changed_files)} 个累计修改文件。",
+            {
+                "changed_files": snapshot.changed_files,
+                "changes": snapshot.changes,
+                "diff": preview,
+                "diff_sha256": hashlib.sha256(
+                    snapshot.diff.encode("utf-8")
+                ).hexdigest(),
+            },
+            truncated=truncated,
+        )
+    except Exception as exc:
+        return tool_failure(str(exc))
+
+
+def inspect_coding_changes(context: CodingToolContext) -> CodingToolResult:
+    """确定性检查累计修改，并附带实际 Patch 调用次数。"""
+
+    result = _inspect_changes(context)
+    if result["success"]:
+        result["data"]["iteration_count"] = get_coding_iteration_count(
+            context
+        )
+    return result
+
+
+def build_coding_tools(context: CodingToolContext) -> list[Any]:
+    """创建绑定仓库和修改范围的 Coding Agent 工具。"""
+
+    @tool("apply_patch")
+    def apply_patch_tool(patch: str) -> dict:
+        """应用一个 unified diff Patch 到当前目标仓库工作区。"""
+
+        return _apply_patch(context, patch)
+
+    @tool("inspect_changes")
+    def inspect_changes_tool() -> dict:
+        """查看当前工作区相对 base commit 的累计修改和 Diff。"""
+
+        return inspect_coding_changes(context)
+
+    return [apply_patch_tool, inspect_changes_tool]
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        temporary.write_text(content, encoding="utf-8", newline="\n")
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _atomic_write_json(path: Path, value: dict[str, Any]) -> None:
+    _atomic_write_text(
+        path,
+        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    )
+
+
+def _check_patch_against_base(
+    context: CodingToolContext,
+    patch_bytes: bytes,
+) -> None:
+    with tempfile.TemporaryDirectory(dir=context.run_dir) as temporary:
+        env = _temporary_index_environment(context, temporary)
+        read_tree = _run_git_bytes(
+            context,
+            ["read-tree", context.base_commit],
+            env=env,
+        )
+        if read_tree.returncode != 0:
+            raise RuntimeError(f"无法读取 base commit：{_git_error(read_tree)}")
+        check = _run_git_bytes(
+            context,
+            ["apply", "--cached", "--check", "--recount", "-"],
+            input_bytes=patch_bytes,
+            env=env,
+        )
+        if check.returncode != 0:
+            raise RuntimeError(f"最终 Patch 无法应用到 base commit：{_git_error(check)}")
+
+
+def save_final_patch(
+    context: CodingToolContext,
+    *,
+    review_approved: bool,
+    tests_passed: bool,
+) -> CodingToolResult:
+    """在 Review 和 Test 均通过后保存唯一的最终 Patch。"""
+
+    patch_written = False
+    metadata_written = False
+    try:
+        if not review_approved or not tests_passed:
+            raise ValueError("只有 Review APPROVE 且最新 Test PASSED 才能保存最终 Patch。")
+
+        patch_path = context.run_dir / "diff.patch"
+        metadata_path = context.run_dir / "diff.json"
+        if patch_path.exists() or metadata_path.exists():
+            raise ValueError("最终 Patch 已存在，禁止覆盖。")
+
+        snapshot = _capture_changes(context)
+        if not snapshot.diff.strip():
+            raise ValueError("当前没有可保存的代码修改。")
+        patch_bytes = snapshot.diff.encode("utf-8")
+        _check_patch_against_base(context, patch_bytes)
+        sha256 = hashlib.sha256(patch_bytes).hexdigest()
+
+        _atomic_write_text(patch_path, snapshot.diff)
+        patch_written = True
+        _atomic_write_json(
+            metadata_path,
+            {
+                "base_commit": context.base_commit,
+                "changed_files": snapshot.changed_files,
+                "sha256": sha256,
+            },
+        )
+        metadata_written = True
+        return tool_success(
+            "最终 Patch 已保存。",
+            {
+                "patch_path": str(patch_path),
+                "metadata_path": str(metadata_path),
+                "changed_files": snapshot.changed_files,
+                "sha256": sha256,
+            },
+        )
+    except Exception as exc:
+        if patch_written and patch_path.exists():
+            patch_path.unlink()
+        if metadata_written and metadata_path.exists():
+            metadata_path.unlink()
+        return tool_failure(str(exc))
+
+
+def _current_head(context: CodingToolContext) -> str:
+    result = _run_git_bytes(context, ["rev-parse", "HEAD"])
+    if result.returncode != 0:
+        raise RuntimeError(f"无法读取当前 HEAD：{_git_error(result)}")
+    return result.stdout.decode("utf-8").strip()
+
+
+def _list_untracked_files(context: CodingToolContext) -> list[str]:
+    result = _run_git_bytes(
+        context,
+        ["ls-files", "--others", "--exclude-standard", "-z"],
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"无法列出未跟踪文件：{_git_error(result)}")
+    return [
+        field.decode("utf-8")
+        for field in result.stdout.split(b"\0")
+        if field
+    ]
+
+
+def rollback_to_base(
+    context: CodingToolContext,
+    reason: str,
+    *,
+    agent_report: dict[str, Any] | None = None,
+) -> CodingToolResult:
+    """记录失败原因并受控恢复到本次运行的 base commit。"""
+
+    iteration = get_coding_iteration_count(context)
+    failure_path = context.run_dir / (
+        f"failure_coding_r{context.repair_round:02d}_"
+        f"s{context.stage_call:02d}_i{iteration:02d}.json"
+    )
+    if failure_path.exists():
+        return tool_failure(f"失败记录已存在，禁止覆盖：{failure_path.name}")
+
+    failure: dict[str, Any] = {
+        "reason": reason.strip() or "未提供失败原因。",
+        "agent_report": agent_report,
+        "base_commit": context.base_commit,
+        "changed_files_before_rollback": [],
+        "rollback_success": False,
+        "rollback_error": None,
+    }
+    envelope = {
+        "stage": "CODING",
+        "repair_round": context.repair_round,
+        "stage_call": context.stage_call,
+        "index": iteration,
+        "payload": failure,
+    }
+
+    try:
+        snapshot = _capture_changes(
+            context,
+            enforce_scope=False,
+            enforce_text=False,
+        )
+        failure["changed_files_before_rollback"] = snapshot.changed_files
+        _atomic_write_json(failure_path, envelope)
+
+        if _current_head(context) != context.base_commit:
+            raise RuntimeError("当前 HEAD 已变化，拒绝自动回滚。")
+
+        restore = _run_git_bytes(
+            context,
+            [
+                "restore",
+                f"--source={context.base_commit}",
+                "--staged",
+                "--worktree",
+                "--",
+                ".",
+            ],
+        )
+        if restore.returncode != 0:
+            raise RuntimeError(f"恢复跟踪文件失败：{_git_error(restore)}")
+
+        for relative in _list_untracked_files(context):
+            normalized = _normalized_relative_path(relative)
+            target = context.repo_root / Path(*PurePosixPath(normalized).parts)
+            lexical = target.absolute()
+            try:
+                lexical.relative_to(context.repo_root)
+            except ValueError as exc:
+                raise RuntimeError(f"未跟踪路径越界，拒绝删除：{relative}") from exc
+            if target.is_symlink():
+                target.unlink()
+                _remove_empty_parents(target, context.repo_root)
+                continue
+
+            resolved = target.resolve(strict=False)
+            try:
+                resolved.relative_to(context.repo_root)
+            except ValueError as exc:
+                raise RuntimeError(f"未跟踪路径越界，拒绝删除：{relative}") from exc
+            if target.is_file():
+                target.unlink()
+                _remove_empty_parents(target, context.repo_root)
+
+        remaining = _run_git_bytes(
+            context,
+            ["status", "--porcelain", "--untracked-files=all"],
+        )
+        if remaining.returncode != 0:
+            raise RuntimeError(f"无法验证回滚结果：{_git_error(remaining)}")
+        if remaining.stdout.strip():
+            raise RuntimeError("回滚后工作区仍存在未提交修改。")
+
+        for artifact in (context.run_dir / "diff.patch", context.run_dir / "diff.json"):
+            if artifact.exists():
+                artifact.unlink()
+
+        failure["rollback_success"] = True
+        _atomic_write_json(failure_path, envelope)
+        return tool_success(
+            "已记录失败原因并恢复到 base commit。",
+            {
+                "failure_path": str(failure_path),
+                "changed_files": snapshot.changed_files,
+            },
+        )
+    except Exception as exc:
+        failure["rollback_error"] = str(exc)
+        _atomic_write_json(failure_path, envelope)
+        return tool_failure(str(exc))

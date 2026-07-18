@@ -1,0 +1,20 @@
+# 私密配置
+.env
+.env.*
+!.env.example
+
+# Python 缓存与本地环境
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest_tmp/
+
+# 构建与运行产物
+build/
+dist/
+*.egg-info/
+.issue-solver-runs/
+
+# IDE 配置
+.idea/

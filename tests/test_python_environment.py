@@ -1,0 +1,102 @@
+import os
+import subprocess
+import venv
+from pathlib import Path
+
+import pytest
+
+from services.python_environment import (
+    build_environment_variables,
+    discover_python_environment,
+)
+
+
+def commit_ignore(repo: Path, entry: str) -> None:
+    (repo / ".gitignore").write_text(f"{entry}/\n", encoding="utf-8")
+    subprocess.run(["git", "add", ".gitignore"], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Issue Solver Tests",
+            "-c",
+            "user.email=tests@example.com",
+            "commit",
+            "-m",
+            "ignore environment",
+        ],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
+
+
+def create_venv(path: Path, *, system_packages: bool) -> None:
+    venv.EnvBuilder(
+        with_pip=False,
+        system_site_packages=system_packages,
+    ).create(path)
+
+
+def test_discovers_repo_venv_and_validates_pytest(git_repo: Path) -> None:
+    commit_ignore(git_repo, ".venv")
+    create_venv(git_repo / ".venv", system_packages=True)
+
+    result = discover_python_environment(
+        git_repo,
+        git_repo.parent / "run",
+    )
+
+    assert result.kind == "VENV"
+    assert result.source == ".venv"
+    assert Path(result.root_path) == (git_repo / ".venv").resolve()
+    assert result.pytest_version.startswith("pytest")
+
+
+def test_missing_repo_environment_does_not_fallback_to_active_python(
+    git_repo: Path,
+) -> None:
+    with pytest.raises(RuntimeError, match="未发现"):
+        discover_python_environment(git_repo, git_repo.parent / "run")
+
+
+def test_rejects_unignored_environment(git_repo: Path) -> None:
+    create_venv(git_repo / ".venv", system_packages=True)
+
+    with pytest.raises(RuntimeError, match="Git ignore"):
+        discover_python_environment(git_repo, git_repo.parent / "run")
+
+
+def test_rejects_multiple_environment_candidates(git_repo: Path) -> None:
+    (git_repo / ".venv").mkdir()
+    (git_repo / "venv").mkdir()
+
+    with pytest.raises(RuntimeError, match="多个虚拟环境"):
+        discover_python_environment(git_repo, git_repo.parent / "run")
+
+
+def test_rejects_environment_without_pytest(git_repo: Path) -> None:
+    commit_ignore(git_repo, ".venv")
+    create_venv(git_repo / ".venv", system_packages=False)
+
+    with pytest.raises(RuntimeError, match="未安装可用的 pytest"):
+        discover_python_environment(git_repo, git_repo.parent / "run")
+
+
+def test_build_environment_variables_uses_run_directory(
+    git_repo: Path,
+) -> None:
+    commit_ignore(git_repo, ".venv")
+    create_venv(git_repo / ".venv", system_packages=True)
+    info = discover_python_environment(git_repo, git_repo.parent / "run")
+    runtime = git_repo.parent / "runtime"
+
+    values = build_environment_variables(info, runtime)
+
+    assert values["VIRTUAL_ENV"] == info.root_path
+    assert values["TEMP"] == str(runtime / "tmp")
+    assert values["TMP"] == str(runtime / "tmp")
+    assert values["TMPDIR"] == str(runtime / "tmp")
+    first_path = Path(values["PATH"].split(os.pathsep)[0])
+    expected = Path(info.root_path) / ("Scripts" if os.name == "nt" else "bin")
+    assert first_path == expected
