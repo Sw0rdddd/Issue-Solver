@@ -16,6 +16,9 @@ NonEmptyText = Annotated[
 ]
 
 
+TEST_TARGET_FORBIDDEN_CHARACTERS = frozenset("|&;<>\r\n\0")
+
+
 class CodingTask(BaseModel):
     """Coordinator 交给 Coding Agent 的结构化修改任务。"""
 
@@ -35,9 +38,10 @@ class CodingTask(BaseModel):
         min_length=1,
         description="允许修改的仓库相对文件或目录范围",
     )
-    validation: list[NonEmptyText] = Field(
+    test_targets: list[NonEmptyText] = Field(
         min_length=1,
-        description="修改完成后需要由后续节点执行的验证",
+        max_length=10,
+        description="修改完成后由 Test 节点执行的仓库相对 pytest node ID",
     )
 
     @field_validator("relevant_files", "allowed_scope")
@@ -71,5 +75,50 @@ class CodingTask(BaseModel):
 
         if len(set(normalized_values)) != len(normalized_values):
             raise ValueError("路径列表不能包含重复项。")
+
+        return normalized_values
+
+    @field_validator("test_targets")
+    @classmethod
+    def validate_test_targets(cls, values: list[str]) -> list[str]:
+        normalized_values: list[str] = []
+
+        for value in values:
+            if any(
+                character.isspace()
+                or character in TEST_TARGET_FORBIDDEN_CHARACTERS
+                for character in value
+            ):
+                raise ValueError(f"测试目标不能包含空白或 Shell 控制字符：{value}")
+
+            path_value, *selectors = value.split("::")
+            normalized_path = path_value.replace("\\", "/")
+            path = PurePosixPath(normalized_path)
+            if (
+                not normalized_path
+                or normalized_path == "."
+                or normalized_path.startswith("/")
+                or normalized_path.startswith("-")
+                or (
+                    len(normalized_path) >= 2
+                    and normalized_path[0].isalpha()
+                    and normalized_path[1] == ":"
+                )
+                or ".." in path.parts
+                or path.suffix.lower() != ".py"
+                or any(not selector for selector in selectors)
+            ):
+                raise ValueError(
+                    "测试目标必须是仓库相对 .py 文件，可带非空 :: 选择器："
+                    f"{value}"
+                )
+
+            normalized_target = path.as_posix()
+            if selectors:
+                normalized_target += "::" + "::".join(selectors)
+            normalized_values.append(normalized_target)
+
+        if len(set(normalized_values)) != len(normalized_values):
+            raise ValueError("测试目标不能包含重复项。")
 
         return normalized_values

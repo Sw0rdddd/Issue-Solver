@@ -39,7 +39,7 @@ def make_task() -> CodingTask:
         relevant_files=["tracked.txt"],
         root_cause="原始内容不正确",
         allowed_scope=["tracked.txt"],
-        validation=["后续运行 pytest -q"],
+        test_targets=["tests/test_tracked.py"],
     )
 
 

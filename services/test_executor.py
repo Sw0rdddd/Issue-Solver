@@ -25,6 +25,30 @@ ENVIRONMENT_ERROR_MARKERS = (
 )
 
 
+def build_targeted_test_command(
+    repo_path: str | Path,
+    test_targets: list[str],
+) -> str:
+    """校验测试目标位于仓库内，并构造受限的定向 pytest 命令。"""
+
+    if not test_targets:
+        raise ValueError("定向测试目标不能为空。")
+
+    repo_root = Path(repo_path).resolve()
+    if not repo_root.is_dir():
+        raise ValueError(f"测试仓库不存在或不是目录：{repo_root}")
+
+    for target in test_targets:
+        path_value = target.split("::", 1)[0]
+        resolved_target = (repo_root / path_value).resolve()
+        try:
+            resolved_target.relative_to(repo_root)
+        except ValueError as exc:
+            raise ValueError(f"测试目标超出目标仓库：{target}") from exc
+
+    return shlex.join(["pytest", "-q", *test_targets])
+
+
 def parse_test_command(command: str) -> list[str]:
     """将受支持的测试命令解析为不经过 Shell 的参数数组。"""
 

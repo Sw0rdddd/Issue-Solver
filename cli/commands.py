@@ -307,7 +307,7 @@ def run_command(args: argparse.Namespace, *, global_mode: bool = False) -> int:
                 test_commands = update.get("test_commands", [])
                 selected_environment = update.get("environment", environment)
                 test_text = (
-                    f"，测试命令 {'; '.join(test_commands)}"
+                    f"，全量测试命令 {'; '.join(test_commands)}"
                     if test_commands
                     else ""
                 )
@@ -433,7 +433,10 @@ def run_command(args: argparse.Namespace, *, global_mode: bool = False) -> int:
                     print(f"[完成 r{review_round:02d}] Review：{verdict}")
                     for issue in getattr(review_result, "issues", []):
                         print(f"  问题：{issue}")
-                    print(f"[开始 r{review_round:02d}] 执行真实测试")
+                    print(
+                        f"[开始 r{review_round:02d}] "
+                        "执行定向测试与全量回归"
+                    )
 
             elif node == "test":
                 test_round = update.get("repair_round", repair_round)

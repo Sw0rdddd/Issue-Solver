@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from nodes import test as test_node_module
+from schemas.coding_task import CodingTask
 from schemas.environment_info import EnvironmentInfo
 from schemas.test_result import TestResult as ExecutionResult
 
@@ -42,6 +43,14 @@ def make_state(tmp_path: Path) -> dict:
         "base_commit": "abc123",
         "run_dir": str(tmp_path / "run"),
         "issue_input": "test",
+        "coding_task": CodingTask(
+            objective="修复示例",
+            acceptance_criteria=["行为正确"],
+            relevant_files=["sample.py"],
+            root_cause="示例行为错误",
+            allowed_scope=["sample.py", "tests/test_sample.py"],
+            test_targets=["tests/test_sample.py::test_value"],
+        ),
         "test_commands": ["pytest one", "pytest two"],
         "environment": EnvironmentInfo(
             kind="VENV",
@@ -77,7 +86,10 @@ def test_test_node_aggregates_round_results_and_stops_on_failure(
 
     result = test_node_module.build_test_node()(make_state(tmp_path))
 
-    assert calls == ["pytest one", "pytest two"]
+    assert calls == [
+        "pytest -q tests/test_sample.py::test_value",
+        "pytest one",
+    ]
     assert result["phase"] == "COORDINATE"
     assert result["cycle"] == 2
     assert [item.status for item in result["latest_test_results"]] == [
@@ -88,6 +100,59 @@ def test_test_node_aggregates_round_results_and_stops_on_failure(
         (tmp_path / "run" / "test_result_r02.json").read_text(encoding="utf-8")
     )
     assert len(artifact["payload"]) == 2
+
+
+def test_test_node_skips_regression_when_targeted_test_fails(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+
+    def fake_execute(**kwargs):
+        calls.append(kwargs["command"])
+        return make_result(tmp_path, "FAILED")
+
+    monkeypatch.setattr(test_node_module, "execute_test_command", fake_execute)
+    monkeypatch.setattr(
+        test_node_module,
+        "worktree_fingerprint",
+        lambda repo_path, base_commit: "unchanged",
+    )
+
+    result = test_node_module.build_test_node()(make_state(tmp_path))
+
+    assert calls == ["pytest -q tests/test_sample.py::test_value"]
+    assert result["latest_test_results"][0].status == "FAILED"
+
+
+def test_test_node_runs_all_regression_commands_after_targeted_pass(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+
+    def fake_execute(**kwargs):
+        calls.append(kwargs["command"])
+        return make_result(tmp_path)
+
+    monkeypatch.setattr(test_node_module, "execute_test_command", fake_execute)
+    monkeypatch.setattr(
+        test_node_module,
+        "worktree_fingerprint",
+        lambda repo_path, base_commit: "unchanged",
+    )
+
+    result = test_node_module.build_test_node()(make_state(tmp_path))
+
+    assert calls == [
+        "pytest -q tests/test_sample.py::test_value",
+        "pytest one",
+        "pytest two",
+    ]
+    assert all(
+        item.status == "PASSED"
+        for item in result["latest_test_results"]
+    )
 
 
 def test_test_node_marks_worktree_mutation_for_rollback(

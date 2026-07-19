@@ -133,7 +133,7 @@ def test_compiled_graph_fans_out_and_joins_explore_nodes(
         relevant_files=["app.py"],
         root_cause="返回值可能为 None",
         allowed_scope=["app.py"],
-        validation=["python -m pytest -q"],
+        test_targets=["tests/test_app.py"],
     )
     explore_calls: list[tuple[str, int, int, int]] = []
     coordinator_calls: list[int] = []
@@ -291,7 +291,7 @@ def test_compiled_graph_runs_review_test_coordinator_and_finalize(
         relevant_files=["app.py"],
         root_cause="缺少空值处理",
         allowed_scope=["app.py"],
-        validation=["pytest -q"],
+        test_targets=["tests/test_app.py"],
     )
     review_result = ReviewResult(
         verdict="APPROVE",

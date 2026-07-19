@@ -8,6 +8,7 @@ from schemas.environment_info import EnvironmentInfo
 from services.test_executor import (
     MAX_MODEL_OUTPUT_CHARS,
     build_output_tail,
+    build_targeted_test_command,
     execute_test_command,
     parse_test_command,
     resolve_pytest_command,
@@ -55,6 +56,37 @@ def test_parse_test_command_accepts_supported_runners(command: str) -> None:
 def test_parse_test_command_rejects_unsafe_or_free_commands(command: str) -> None:
     with pytest.raises(ValueError):
         parse_test_command(command)
+
+
+def test_build_targeted_test_command_uses_repo_relative_node_ids(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    command = build_targeted_test_command(
+        repo,
+        ["tests/test_app.py::TestQuery::test_empty"],
+    )
+
+    assert command == "pytest -q tests/test_app.py::TestQuery::test_empty"
+
+
+def test_build_targeted_test_command_rejects_symlink_escape(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = repo / "linked"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("当前环境不允许创建符号链接")
+
+    with pytest.raises(ValueError, match="超出目标仓库"):
+        build_targeted_test_command(repo, ["linked/test_external.py"])
 
 
 @pytest.mark.parametrize(

@@ -82,7 +82,7 @@ def make_coding_task() -> CodingTask:
         relevant_files=["app.py"],
         root_cause="返回值可能为 None",
         allowed_scope=["app.py", "tests/test_app.py"],
-        validation=["python -m pytest -q"],
+        test_targets=["tests/test_app.py"],
     )
 
 
@@ -109,7 +109,7 @@ def test_coordinator_prompt_requires_nested_coding_task_object() -> None:
     assert '"acceptance_criteria": [' in COORDINATOR_SYSTEM_PROMPT
     assert '"relevant_files": [' in COORDINATOR_SYSTEM_PROMPT
     assert '"allowed_scope": [' in COORDINATOR_SYSTEM_PROMPT
-    assert '"validation": [' in COORDINATOR_SYSTEM_PROMPT
+    assert '"test_targets": [' in COORDINATOR_SYSTEM_PROMPT
 
     for field in (
         "objective",
@@ -117,7 +117,7 @@ def test_coordinator_prompt_requires_nested_coding_task_object() -> None:
         "relevant_files",
         "root_cause",
         "allowed_scope",
-        "validation",
+        "test_targets",
     ):
         assert f'"{field}":' in COORDINATOR_SYSTEM_PROMPT
 

@@ -30,8 +30,10 @@ COORDINATOR_SYSTEM_PROMPT = """
 - 选择 CODE 时，explore_focuses 必须是空数组，coding_task 必须是 JSON 对象。
 - 禁止将 coding_task 序列化为 JSON 字符串；不要给整个对象添加引号或转义。
 - coding_task 必须直接包含 CodingTask 的全部字段。
-- acceptance_criteria、relevant_files、allowed_scope、validation 必须是 JSON 数组，不能是逗号拼接的字符串。
+- acceptance_criteria、relevant_files、allowed_scope、test_targets 必须是 JSON 数组，不能是逗号拼接的字符串。
 - relevant_files 和 allowed_scope 中的路径必须是仓库相对路径。
+- test_targets 必须包含 1 至 10 个仓库相对 .py 测试文件或 pytest node ID，例如 tests/test_search.py::test_case_insensitive。
+- test_targets 只能描述精确测试目标，不得包含 pytest、python -m pytest、命令参数或自然语言。
 
 正确的 CODE 决策示例：
 {
@@ -47,7 +49,7 @@ COORDINATOR_SYSTEM_PROMPT = """
     "relevant_files": ["src/search.py", "tests/test_search.py"],
     "root_cause": "搜索逻辑直接比较原始字符串",
     "allowed_scope": ["src/search.py", "tests/test_search.py"],
-    "validation": ["pytest -q"]
+    "test_targets": ["tests/test_search.py::test_case_insensitive"]
   }
 }
 """.strip()

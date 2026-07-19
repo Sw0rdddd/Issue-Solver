@@ -44,7 +44,7 @@ def test_issue_spec_defaults_and_json_serialization() -> None:
                 "relevant_files": ["app.py"],
                 "root_cause": "返回值可能为 None",
                 "allowed_scope": ["app.py"],
-                "validation": ["pytest -q"],
+                "test_targets": ["tests/test_app.py"],
             },
         ),
         (
@@ -126,7 +126,7 @@ def test_coding_task_rejects_legacy_string_lists() -> None:
             relevant_files="app.py",
             root_cause="返回值可能为 None",
             allowed_scope="app.py, tests/test_app.py",
-            validation="pytest -q",
+            test_targets="tests/test_app.py",
         )
 
 
@@ -142,7 +142,7 @@ def test_coding_task_rejects_non_relative_scope(invalid_path: str) -> None:
             relevant_files=["app.py"],
             root_cause="返回值可能为 None",
             allowed_scope=[invalid_path],
-            validation=["pytest -q"],
+            test_targets=["tests/test_app.py"],
         )
 
 
@@ -154,8 +154,71 @@ def test_coding_task_rejects_unknown_fields() -> None:
             relevant_files=["app.py"],
             root_cause="返回值可能为 None",
             allowed_scope=["app.py"],
-            validation=["pytest -q"],
+            test_targets=["tests/test_app.py"],
             shell_command="rm -rf .",
+        )
+
+
+@pytest.mark.parametrize(
+    "invalid_target",
+    [
+        "",
+        "tests",
+        "../tests/test_app.py",
+        "/tests/test_app.py",
+        "C:/repo/tests/test_app.py",
+        "pytest -q tests/test_app.py",
+        "tests/test_app.py::",
+        "tests/test_app.py;whoami",
+    ],
+)
+def test_coding_task_rejects_invalid_test_targets(
+    invalid_target: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        CodingTask(
+            objective="修复空值处理",
+            acceptance_criteria=["返回空列表"],
+            relevant_files=["app.py"],
+            root_cause="返回值可能为 None",
+            allowed_scope=["app.py"],
+            test_targets=[invalid_target],
+        )
+
+
+def test_coding_task_normalizes_pytest_node_ids() -> None:
+    task = CodingTask(
+        objective="修复空值处理",
+        acceptance_criteria=["返回空列表"],
+        relevant_files=["app.py"],
+        root_cause="返回值可能为 None",
+        allowed_scope=["app.py"],
+        test_targets=["tests\\test_app.py::TestQuery::test_empty"],
+    )
+
+    assert task.test_targets == [
+        "tests/test_app.py::TestQuery::test_empty"
+    ]
+
+
+@pytest.mark.parametrize(
+    "test_targets",
+    [
+        ["tests/test_app.py", "tests/test_app.py"],
+        [f"tests/test_{index}.py" for index in range(11)],
+    ],
+)
+def test_coding_task_rejects_duplicate_or_excessive_test_targets(
+    test_targets: list[str],
+) -> None:
+    with pytest.raises(ValidationError):
+        CodingTask(
+            objective="修复空值处理",
+            acceptance_criteria=["返回空列表"],
+            relevant_files=["app.py"],
+            root_cause="返回值可能为 None",
+            allowed_scope=["app.py"],
+            test_targets=test_targets,
         )
 
 

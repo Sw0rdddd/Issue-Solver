@@ -41,7 +41,7 @@ def make_state(run_dir: Path) -> dict:
             relevant_files=["search.py"],
             root_cause="直接比较原字符串",
             allowed_scope=["search.py"],
-            validation=["pytest -q"],
+            test_targets=["tests/test_search.py"],
         ),
         "coding_result": CodingResult(
             success=True,

@@ -406,7 +406,7 @@ def test_run_streams_graph_with_initial_state_and_progress(
 
     output = capsys.readouterr().out
     assert "[开始] 初始化仓库" in output
-    assert "[完成] 初始化仓库：python，测试命令 pytest -q" in output
+    assert "[完成] 初始化仓库：python，全量测试命令 pytest -q" in output
     assert f"[环境] VENV：{repo_root / '.venv' / 'Scripts' / 'python.exe'}" in output
     assert "[完成] Issue：搜索忽略大小写" in output
     assert "[决策 r01/s01] 并行探索，共 2 个任务" in output

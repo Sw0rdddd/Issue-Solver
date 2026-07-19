@@ -2,11 +2,13 @@ from pathlib import Path
 
 from config import Setting
 from graph.state import ResolverState
+from schemas.coding_task import CodingTask
 from schemas.environment_info import EnvironmentInfo
 from schemas.test_result import TestResult
 from services.artifacts import write_round_artifact
 from services.test_executor import (
     append_environment_error,
+    build_targeted_test_command,
     execute_test_command,
     worktree_fingerprint,
 )
@@ -38,9 +40,19 @@ def build_test_node():
             if timeout <= 0 or tail_lines < 1:
                 raise RuntimeError("测试超时和日志尾部行数必须大于 0。")
 
-            commands = state.get("test_commands", [])
-            if not commands:
-                commands = ["<未检测到测试命令>"]
+            coding_task = state.get("coding_task")
+            if not isinstance(coding_task, CodingTask):
+                raise RuntimeError("State 中缺少有效的 CodingTask。")
+            regression_commands = state.get("test_commands", [])
+            if not regression_commands:
+                raise RuntimeError("State 中缺少全量回归测试命令。")
+            targeted_command = build_targeted_test_command(
+                repo_path,
+                coding_task.test_targets,
+            )
+            commands = list(
+                dict.fromkeys([targeted_command, *regression_commands])
+            )
             environment_value = state.get("environment")
             if environment_value is None:
                 raise RuntimeError("State 中缺少已验证的目标虚拟环境。")
