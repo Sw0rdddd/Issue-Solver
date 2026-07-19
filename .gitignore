@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+AGENTS.md
 
 # Python 缓存与本地环境
 .venv/

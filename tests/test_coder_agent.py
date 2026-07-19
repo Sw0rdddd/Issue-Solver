@@ -64,7 +64,7 @@ def test_build_coding_input_contains_structured_context() -> None:
         relevant_files=["search.py"],
         root_cause="使用了区分大小写的比较",
         allowed_scope=["search.py"],
-        validation=["pytest -q"],
+        test_targets=["tests/test_search.py"],
     )
 
     content = build_coding_input(

@@ -24,7 +24,7 @@ class TestResult(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    command: NonEmptyText = Field(description="仓库检测得到的逻辑测试命令")
+    command: NonEmptyText = Field(description="程序构造或仓库检测得到的逻辑测试命令")
     resolved_command: list[NonEmptyText] = Field(
         min_length=1,
         description="绑定目标虚拟环境后的实际 argv",
