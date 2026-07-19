@@ -45,4 +45,4 @@ issue-solver run --issue <issue-url-or-text>
 - 两种命令的运行日志默认都位于 `.issue-solver-runs/<repo>/<run-id>/`；
 - `RUN_ROOT` 可在 `.env` 配置，`--run-root` 可临时覆盖；运行日志不得写入目标仓库。
 
-详细设计见 [架构文档](docs/issue-to-solution-architecture.md) 和 [实施计划](docs/issue-to-solution-implementation-plan.md)。
+完整的架构、运行逻辑、核心数据结构与面试讲解要点见[项目说明](docs/project-overview.md)。
