@@ -53,7 +53,3 @@ class Setting:
         if not run_root:
             raise ValueError("配置 RUN_ROOT 不能为空。")
         self.RUN_ROOT = Path(run_root).expanduser()
-        global_run_root = os.environ.get("GLOBAL_RUN_ROOT", "runs").strip()
-        if not global_run_root:
-            raise ValueError("配置 GLOBAL_RUN_ROOT 不能为空。")
-        self.GLOBAL_RUN_ROOT = Path(global_run_root).expanduser()

@@ -247,11 +247,9 @@ def test_global_run_detects_current_git_repository(
 ) -> None:
     repo_root, compiled_graph, _ = prepare_runtime(monkeypatch, tmp_path)
     (tmp_path / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
-    global_home = tmp_path / "global-home"
     nested = repo_root / "src" / "package"
     nested.mkdir(parents=True)
     monkeypatch.chdir(nested)
-    monkeypatch.setattr(commands, "GLOBAL_HOME", global_home)
     captured_state: dict[str, object] = {}
     configure_success_stream(compiled_graph, captured_state)
 
@@ -263,7 +261,7 @@ def test_global_run_detects_current_git_repository(
     assert exit_code == 0
     assert captured_state["repo_path"] == str(repo_root)
     assert captured_state["run_dir"] == str(
-        global_home / "runs" / "repo" / "run_test"
+        tmp_path / ".issue-solver-runs" / "repo" / "run_test"
     )
 
 

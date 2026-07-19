@@ -24,7 +24,6 @@ def test_setting_reflects_loaded_environment() -> None:
     assert setting.TEST_TIMEOUT == 300
     assert setting.TEST_TAIL_LINES == 100
     assert setting.RUN_ROOT == Path(".issue-solver-runs")
-    assert setting.GLOBAL_RUN_ROOT == Path("runs")
 
 
 def test_setting_reads_runtime_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -48,7 +47,6 @@ def test_setting_reads_runtime_overrides(monkeypatch: pytest.MonkeyPatch) -> Non
         ("TEST_TIMEOUT", "not-a-number"),
         ("TEST_TAIL_LINES", "-1"),
         ("RUN_ROOT", "   "),
-        ("GLOBAL_RUN_ROOT", "   "),
     ],
 )
 def test_setting_rejects_invalid_values(

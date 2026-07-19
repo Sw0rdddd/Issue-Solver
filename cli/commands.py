@@ -16,7 +16,6 @@ from services.run_store import create_run_id
 
 
 CONTROLLER_ROOT = Path(__file__).resolve().parents[1]
-GLOBAL_HOME = Path.home() / ".issue-solver"
 
 
 def positive_int(value: str) -> int:
@@ -90,7 +89,7 @@ def build_parser(*, global_mode: bool = False) -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         "--run-root",
-        help="覆盖 .env 中的运行目录（相对路径基于当前运行模式的根目录）。",
+        help="覆盖 .env 中的 RUN_ROOT（相对路径基于 issue-solver 项目根目录）。",
     )
     run_parser.add_argument(
         "--quiet",
@@ -210,13 +209,11 @@ def run_command(args: argparse.Namespace, *, global_mode: bool = False) -> int:
 
     setting = Setting()
     run_id = create_run_id()
-    configured_run_root = args.run_root or (
-        setting.GLOBAL_RUN_ROOT if global_mode else setting.RUN_ROOT
-    )
+    configured_run_root = args.run_root or setting.RUN_ROOT
     run_root = _resolve_run_root(
         repo_root,
         configured_run_root,
-        GLOBAL_HOME if global_mode else CONTROLLER_ROOT,
+        CONTROLLER_ROOT,
     )
     run_dir = (
         run_root / repo_root.name / run_id

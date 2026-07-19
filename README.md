@@ -42,8 +42,7 @@ issue-solver run --issue <issue-url-or-text>
 ## 配置与产物
 
 - 配置文件始终是本项目根目录的 `.env`；
-- 本地模块命令的运行日志默认位于 `.issue-solver-runs/<repo>/<run-id>/`；
-- 全局命令的运行日志默认位于 `~/.issue-solver/runs/<repo>/<run-id>/`；
-- `RUN_ROOT`、`GLOBAL_RUN_ROOT` 可在 `.env` 配置，`--run-root` 可临时覆盖；运行日志不得写入目标仓库。
+- 两种命令的运行日志默认都位于 `.issue-solver-runs/<repo>/<run-id>/`；
+- `RUN_ROOT` 可在 `.env` 配置，`--run-root` 可临时覆盖；运行日志不得写入目标仓库。
 
 详细设计见 [架构文档](docs/issue-to-solution-architecture.md) 和 [实施计划](docs/issue-to-solution-implementation-plan.md)。
