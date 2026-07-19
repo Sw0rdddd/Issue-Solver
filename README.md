@@ -11,6 +11,44 @@
 
 工具不会创建虚拟环境、安装依赖，也不会读取目标仓库的 `.env`。即使目标仓库存在 `tox.ini`，工具也不会调用 tox 或使用其环境矩阵，而是始终在上述已准备好的环境中直接执行 `python -m pytest`。仅能通过 tox 完成环境准备或测试编排的项目暂不支持。
 
+## 准备本项目环境
+
+安装 [uv](https://docs.astral.sh/uv/) 后，在 `issue-solver` 根目录执行：
+
+```powershell
+uv sync
+Copy-Item .env.example .env
+uv run pytest -q
+```
+
+`uv sync` 会创建本项目的 `.venv` 并安装锁定依赖。随后在 `.env` 中填写 `API_KEY`、`BASE_URL` 和 `MODEL_NAME`；最后一条命令用于确认本项目环境可用。
+
+## 准备目标仓库环境
+
+以下以 PowerShell 和 `.venv` 为例：
+
+```powershell
+cd <target-repo>
+python -m venv .venv
+
+# 根据目标仓库的说明安装项目及测试依赖，以下命令二选一
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pip install -e ".[test]"
+
+# 确认 pytest 可由该环境直接运行
+.\.venv\Scripts\python.exe -m pytest --version
+```
+
+依赖文件和 extras 名称以目标仓库为准。还需将 `.venv/` 加入目标仓库的 `.gitignore`，并用 `git check-ignore .venv` 确认它已被忽略。仓库根目录只能保留一个受支持的环境目录。
+
+启动前还要确保目标仓库工作区干净：
+
+```powershell
+git -C <target-repo> status --short
+```
+
+该命令应无输出。工具会把启动时目标仓库的当前 `HEAD` 记录为 `base_commit`，后续变更校验、回滚和最终 Patch 都以此提交为基线。已有修改应由开发者提前提交或自行清理，工具不会覆盖或代为提交这些改动。
+
 ## 使用
 
 在本项目内显式指定目标仓库：
