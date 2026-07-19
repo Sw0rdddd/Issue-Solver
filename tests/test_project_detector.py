@@ -52,7 +52,7 @@ def test_pytest_ini_has_priority_over_tox(tmp_path: Path) -> None:
 def test_rejects_tox_without_pytest_configuration_or_tests(tmp_path: Path) -> None:
     (tmp_path / "tox.ini").write_text("[tox]\n", encoding="utf-8")
 
-    with pytest.raises(RuntimeError, match="只允许 pytest"):
+    with pytest.raises(RuntimeError, match="不会调用 tox"):
         detect_test_commands(tmp_path)
 
 
@@ -67,6 +67,13 @@ def test_detects_pytest_configuration_in_pyproject(tmp_path: Path) -> None:
 
 def test_detects_tests_directory(tmp_path: Path) -> None:
     (tmp_path / "tests").mkdir()
+
+    assert detect_test_commands(tmp_path) == ["pytest -q"]
+
+
+def test_tests_directory_has_priority_over_tox(tmp_path: Path) -> None:
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tox.ini").write_text("[tox]\n", encoding="utf-8")
 
     assert detect_test_commands(tmp_path) == ["pytest -q"]
 

@@ -6,10 +6,10 @@
 
 - Python 3.13+；
 - 目标目录是已有提交的 Git 仓库，且工作区干净；
-- 目标仓库根目录存在已准备好的 `.venv`、`venv` 或 `.conda`，并已安装 pytest；
+- 开发者已在目标仓库根目录准备好唯一的 `.venv`、`venv` 或 `.conda`，并安装目标项目、pytest 及全部测试依赖；
 - 在本项目根目录 `.env` 配置 `API_KEY`、`BASE_URL` 和 `MODEL_NAME`。
 
-工具不会创建虚拟环境、安装依赖，也不会读取目标仓库的 `.env`。
+工具不会创建虚拟环境、安装依赖，也不会读取目标仓库的 `.env`。即使目标仓库存在 `tox.ini`，工具也不会调用 tox 或使用其环境矩阵，而是始终在上述已准备好的环境中直接执行 `python -m pytest`。仅能通过 tox 完成环境准备或测试编排的项目暂不支持。
 
 ## 使用
 
@@ -45,4 +45,4 @@ issue-solver run --issue <issue-url-or-text>
 - 两种命令的运行日志默认都位于 `.issue-solver-runs/<repo>/<run-id>/`；
 - `RUN_ROOT` 可在 `.env` 配置，`--run-root` 可临时覆盖；运行日志不得写入目标仓库。
 
-完整的架构、运行逻辑、核心数据结构与面试讲解要点见[项目说明](docs/project-overview.md)。
+完整的架构、运行逻辑、核心数据结构与设计取舍见[项目说明](docs/project-overview.md)。

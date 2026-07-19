@@ -57,7 +57,9 @@ def detect_test_commands(repo_path: Path) -> list[str]:
 
     if (repo_path / "tox.ini").exists():
         raise RuntimeError(
-            "首版只允许 pytest；检测到 tox.ini，但未检测到 pytest 配置或 tests 目录。"
+            "检测到 tox.ini，但未检测到可直接运行的 pytest 配置或 tests 目录；"
+            "本工具不会调用 tox、创建虚拟环境或安装依赖。请开发者先准备"
+            "仓库虚拟环境及测试依赖，并提供可直接运行的 pytest 入口。"
         )
 
     return []
