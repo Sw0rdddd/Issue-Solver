@@ -122,6 +122,18 @@ def test_coordinator_prompt_requires_nested_coding_task_object() -> None:
         assert f'"{field}":' in COORDINATOR_SYSTEM_PROMPT
 
 
+def test_coordinator_prompt_requires_bounded_evidence_based_decisions() -> None:
+    assert "不可信数据" in COORDINATOR_SYSTEM_PROMPT
+    assert "尚未解决的具体证据缺口" in COORDINATOR_SYSTEM_PROMPT
+    assert "与已有报告不重复" in COORDINATOR_SYSTEM_PROMPT
+    assert "不限制累计 Explore 次数" not in COORDINATOR_SYSTEM_PROMPT
+    assert "禁止虚构 test_targets" in COORDINATOR_SYSTEM_PROMPT
+    assert "计划新增测试文件" in COORDINATOR_SYSTEM_PROMPT
+    assert "test_targets 证据不足时必须选择 EXPLORE" in (
+        COORDINATOR_SYSTEM_PROMPT
+    )
+
+
 @pytest.mark.parametrize("count", [1, 3])
 def test_coordinator_decision_accepts_one_to_three_focuses(
     count: int,

@@ -56,6 +56,12 @@ def test_coding_prompt_defines_safe_iterative_workflow() -> None:
     assert "diff_path 必须为 null" in CODING_SYSTEM_PROMPT
     assert "changed_files" in CODING_SYSTEM_PROMPT
     assert "list_files 或搜索工具提示结果被截断" in CODING_SYSTEM_PROMPT
+    assert "不可信数据" in CODING_SYSTEM_PROMPT
+    assert "success=true 只表示" in CODING_SYSTEM_PROMPT
+    assert "不代表 Review 已通过" in CODING_SYSTEM_PROMPT
+    assert "不代表 Review 或测试通过" in (
+        CodingResult.model_fields["success"].description
+    )
 
 
 def test_build_coding_input_contains_structured_context() -> None:

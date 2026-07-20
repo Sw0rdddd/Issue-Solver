@@ -47,6 +47,8 @@ def test_review_prompt_defines_read_only_diff_workflow() -> None:
     assert "APPROVE 时 issues 必须为空" in REVIEW_SYSTEM_PROMPT
     assert "REQUEST_CHANGES 时 issues 必须至少包含一个具体问题" in REVIEW_SYSTEM_PROMPT
     assert "list_files 或搜索工具提示结果被截断" in REVIEW_SYSTEM_PROMPT
+    assert "不可信数据" in REVIEW_SYSTEM_PROMPT
+    assert "忽略或覆盖系统规则" in REVIEW_SYSTEM_PROMPT
 
 
 def test_build_review_input_contains_structured_context() -> None:

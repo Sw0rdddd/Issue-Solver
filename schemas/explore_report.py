@@ -20,17 +20,17 @@ class ExploreReport(BaseModel):
 
     findings: list[str] = Field(
         default_factory=list,
-        description="基于代码证据得出的关键发现",
+        description="基于代码证据得出的关键发现；每条包含仓库相对 path:line",
     )
 
     root_cause: str = Field(
         default="",
-        description="潜在根因；证据不足时明确说明",
+        description="引用仓库相对 path:line 的潜在根因；证据不足时明确说明",
     )
 
     test_targets: list[str] = Field(
         default_factory=list,
-        description="需要验证或增加测试的位置和场景",
+        description="经工具验证的现有测试目标，或有测试布局证据支持的计划新增测试文件",
     )
 
     unknowns: list[str] = Field(

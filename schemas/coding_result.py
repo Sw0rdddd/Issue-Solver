@@ -6,7 +6,10 @@ class CodingResult(BaseModel):
 
     success: bool = Field(
         strict=True,
-        description="Coding Agent 是否完成了本次任务",
+        description=(
+            "Coding Agent 是否完成允许范围内的修改和 Diff 自检；"
+            "不代表 Review 或测试通过"
+        ),
     )
     changed_files: list[str] = Field(description="实际修改的文件列表")
     summary: str = Field(min_length=1, description="修改内容的简要说明")
