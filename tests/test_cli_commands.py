@@ -2,6 +2,7 @@ import subprocess
 import sys
 import io
 import json
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -9,6 +10,7 @@ from unittest.mock import Mock
 import pytest
 
 from cli import commands
+from config import Setting
 from schemas.environment_info import EnvironmentInfo
 
 
@@ -120,6 +122,15 @@ def configure_success_stream(
         }
 
     compiled_graph.stream.side_effect = stream
+
+
+def configured_run_dir(controller_root: Path, repo_root: Path) -> Path:
+    run_root = commands._resolve_run_root(
+        repo_root,
+        Setting().RUN_ROOT,
+        controller_root,
+    )
+    return run_root / repo_root.name / "run_test"
 
 
 def test_module_help_is_available() -> None:
@@ -261,7 +272,7 @@ def test_global_run_detects_current_git_repository(
     assert exit_code == 0
     assert captured_state["repo_path"] == str(repo_root)
     assert captured_state["run_dir"] == str(
-        tmp_path / ".issue-solver-runs" / "repo" / "run_test"
+        configured_run_dir(tmp_path, repo_root)
     )
 
 
@@ -292,13 +303,10 @@ def test_environment_failure_stops_before_model_even_when_quiet(
     assert exit_code == 1
     assert "环境预检失败" in captured.err
     assert "未调用 LLM" in captured.err
+    assert "总 Token：0" in captured.out
     model_constructor.assert_not_called()
     failure = (
-        tmp_path
-        / ".issue-solver-runs"
-        / "repo"
-        / "run_test"
-        / "failure_environment.json"
+        configured_run_dir(tmp_path, repo_root) / "failure_environment.json"
     )
     assert failure.is_file()
 
@@ -358,6 +366,17 @@ def test_run_streams_graph_with_initial_state_and_progress(
     )
     captured_state: dict[str, object] = {}
     configure_success_stream(compiled_graph, captured_state)
+    usage_callback = SimpleNamespace(
+        usage_metadata={
+            "test-model": {"total_tokens": 120},
+            "review-model": {"total_tokens": 30},
+        }
+    )
+    monkeypatch.setattr(
+        commands,
+        "get_usage_metadata_callback",
+        lambda: nullcontext(usage_callback),
+    )
 
     exit_code = commands.main(
         [
@@ -373,7 +392,8 @@ def test_run_streams_graph_with_initial_state_and_progress(
         ]
     )
 
-    run_dir = tmp_path / ".issue-solver-runs" / "repo" / "run_test"
+    setting = Setting()
+    run_dir = configured_run_dir(tmp_path, repo_root)
     assert exit_code == 0
     assert run_dir.is_dir()
     assert captured_state == {
@@ -385,8 +405,8 @@ def test_run_streams_graph_with_initial_state_and_progress(
         "run_dir": str(run_dir),
         "issue_input": "修复查询失败",
         "max_cycles": 5,
-        "test_timeout": 300.0,
-        "test_tail_lines": 100,
+        "test_timeout": setting.TEST_TIMEOUT,
+        "test_tail_lines": setting.TEST_TAIL_LINES,
         "environment": EnvironmentInfo(
             kind="VENV",
             root_path=str(repo_root / ".venv"),
@@ -421,6 +441,7 @@ def test_run_streams_graph_with_initial_state_and_progress(
     assert "当前阶段：REVIEW" in output
     assert "下一动作：CODE" not in output
     assert f"运行目录：{run_dir}" in output
+    assert "总 Token：150" in output
     assert "最终耗时：" in output
 
 
@@ -451,6 +472,7 @@ def test_quiet_hides_progress_but_keeps_summary(
     assert "[探索" not in output
     assert "运行 ID：run_test" in output
     assert "当前阶段：REVIEW" in output
+    assert "总 Token：0" in output
     assert "最终耗时：" in output
 
 
@@ -623,15 +645,24 @@ def test_run_returns_one_when_graph_raises(
 ) -> None:
     repo_root, compiled_graph, _ = prepare_runtime(monkeypatch, tmp_path)
     compiled_graph.stream.side_effect = RuntimeError("模型不可用")
+    usage_callback = SimpleNamespace(
+        usage_metadata={"test-model": {"total_tokens": 42}}
+    )
+    monkeypatch.setattr(
+        commands,
+        "get_usage_metadata_callback",
+        lambda: nullcontext(usage_callback),
+    )
 
     exit_code = commands.main(
         ["run", "--repo", str(repo_root), "--issue", "异常场景"]
     )
 
-    error = capsys.readouterr().err
+    captured = capsys.readouterr()
     assert exit_code == 1
-    assert "运行失败：模型不可用" in error
-    assert "Traceback" not in error
+    assert "运行失败：模型不可用" in captured.err
+    assert "Traceback" not in captured.err
+    assert "总 Token：42" in captured.out
 
 
 def test_review_failure_interactively_rolls_back_and_records_decision(

@@ -4,6 +4,11 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
+from langchain_core.callbacks import (
+    UsageMetadataCallbackHandler,
+    get_usage_metadata_callback,
+)
+
 from config import Setting
 from graph.builder import build_graph
 from nodes.finalize import rollback_state_to_base
@@ -16,6 +21,15 @@ from services.run_store import create_run_id
 
 
 CONTROLLER_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _total_tokens(callback: UsageMetadataCallbackHandler) -> int:
+    """汇总本次运行中所有模型调用上报的 Token。"""
+
+    return sum(
+        usage.get("total_tokens", 0)
+        for usage in callback.usage_metadata.values()
+    )
 
 
 def positive_int(value: str) -> int:
@@ -510,13 +524,15 @@ def main(
 
     if args.command == "run":
         started = time.monotonic()
-        try:
-            return run_command(args, global_mode=global_mode)
-        except Exception as exc:
-            print(f"运行失败：{exc}", file=sys.stderr)
-            return 1
-        finally:
-            print(f"最终耗时：{time.monotonic() - started:.2f} 秒")
+        with get_usage_metadata_callback() as usage_callback:
+            try:
+                return run_command(args, global_mode=global_mode)
+            except Exception as exc:
+                print(f"运行失败：{exc}", file=sys.stderr)
+                return 1
+            finally:
+                print(f"总 Token：{_total_tokens(usage_callback)}")
+                print(f"最终耗时：{time.monotonic() - started:.2f} 秒")
 
     parser.error(f"未知命令：{args.command}")
 

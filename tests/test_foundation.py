@@ -20,10 +20,14 @@ def test_setting_reflects_loaded_environment() -> None:
     assert setting.API_KEY == os.environ.get("API_KEY")
     assert setting.BASE_URL == os.environ.get("BASE_URL")
     assert setting.MODEL_NAME == os.environ.get("MODEL_NAME")
-    assert setting.MAX_CYCLES == 5
-    assert setting.TEST_TIMEOUT == 300
-    assert setting.TEST_TAIL_LINES == 100
-    assert setting.RUN_ROOT == Path(".issue-solver-runs")
+    assert setting.MAX_CYCLES == int(os.environ.get("MAX_CYCLES", "5"))
+    assert setting.TEST_TIMEOUT == float(os.environ.get("TEST_TIMEOUT", "300"))
+    assert setting.TEST_TAIL_LINES == int(
+        os.environ.get("TEST_TAIL_LINES", "100")
+    )
+    assert setting.RUN_ROOT == Path(
+        os.environ.get("RUN_ROOT", ".issue-solver-runs")
+    ).expanduser()
 
 
 def test_setting_reads_runtime_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,6 +65,7 @@ def test_setting_rejects_invalid_values(
 
 
 def test_dotenv_overrides_process_environment() -> None:
+    expected_max_cycles = str(Setting().MAX_CYCLES)
     environment = os.environ.copy()
     environment["MAX_CYCLES"] = "99"
 
@@ -73,12 +78,13 @@ def test_dotenv_overrides_process_environment() -> None:
         check=True,
     )
 
-    assert result.stdout.strip() == "5"
+    assert result.stdout.strip() == expected_max_cycles
 
 
 def test_dotenv_is_loaded_from_project_root_not_current_directory(
     tmp_path: Path,
 ) -> None:
+    expected_max_cycles = str(Setting().MAX_CYCLES)
     target_repo = tmp_path / "target-repo"
     target_repo.mkdir()
     (target_repo / ".env").write_text("MAX_CYCLES=99\n", encoding="utf-8")
@@ -92,7 +98,7 @@ def test_dotenv_is_loaded_from_project_root_not_current_directory(
         check=True,
     )
 
-    assert result.stdout.strip() == "5"
+    assert result.stdout.strip() == expected_max_cycles
 
 
 def test_project_declares_global_issue_solver_command() -> None:
