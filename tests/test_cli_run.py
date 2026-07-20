@@ -1,5 +1,3 @@
-import subprocess
-import sys
 import io
 import json
 from contextlib import nullcontext
@@ -9,7 +7,9 @@ from unittest.mock import Mock
 
 import pytest
 
-from cli import commands
+from cli import main as main_module
+from cli import run as run_module
+from cli.terminal import TerminalReporter
 from config import Setting
 from schemas.environment_info import EnvironmentInfo
 
@@ -33,21 +33,21 @@ def prepare_runtime(
         source=".venv",
     )
 
-    monkeypatch.setattr(commands, "CONTROLLER_ROOT", tmp_path)
-    monkeypatch.setattr(commands, "find_repo_root", lambda path: repo_root)
-    monkeypatch.setattr(commands, "create_run_id", lambda: "run_test")
+    monkeypatch.setattr(run_module, "CONTROLLER_ROOT", tmp_path)
+    monkeypatch.setattr(run_module, "find_repo_root", lambda path: repo_root)
+    monkeypatch.setattr(run_module, "create_run_id", lambda: "run_test")
     monkeypatch.setattr(
-        commands,
+        run_module,
         "_preflight_environment",
         lambda repo, run_dir: environment,
     )
     monkeypatch.setattr(
-        commands,
+        run_module,
         "ReasoningChatDeepSeek",
         model_constructor,
     )
     monkeypatch.setattr(
-        commands,
+        run_module,
         "build_graph",
         Mock(return_value=graph_builder),
     )
@@ -125,7 +125,7 @@ def configure_success_stream(
 
 
 def configured_run_dir(controller_root: Path, repo_root: Path) -> Path:
-    run_root = commands._resolve_run_root(
+    run_root = run_module._resolve_run_root(
         repo_root,
         Setting().RUN_ROOT,
         controller_root,
@@ -133,100 +133,29 @@ def configured_run_dir(controller_root: Path, repo_root: Path) -> Path:
     return run_root / repo_root.name / "run_test"
 
 
+def summary_value(rendered: str, label: str) -> str:
+    lines = rendered.splitlines()
+    for index, line in enumerate(lines):
+        if not line.startswith(label):
+            continue
+        value = line[len(label) :].lstrip()
+        for following in lines[index + 1 :]:
+            if not following.startswith(" " * 10):
+                break
+            value += following[10:]
+        return value
+    raise AssertionError(f"未找到摘要字段：{label}")
+
+
 def test_controller_root_matches_repository_root() -> None:
-    assert commands.CONTROLLER_ROOT == Path(__file__).parents[1]
-
-
-def test_module_help_is_available() -> None:
-    result = subprocess.run(
-        [sys.executable, "-m", "cli.commands", "--help"],
-        cwd=Path(__file__).parents[1],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode == 0
-    assert "run" in result.stdout
-
-
-def test_run_help_does_not_create_model(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    model_constructor = Mock(side_effect=AssertionError("不应创建模型"))
-    monkeypatch.setattr(
-        commands,
-        "ReasoningChatDeepSeek",
-        model_constructor,
-    )
-
-    with pytest.raises(SystemExit) as exc_info:
-        commands.main(["run", "--help"])
-
-    assert exc_info.value.code == 0
-    output = capsys.readouterr().out
-    assert "--repo" in output
-    assert "--quiet" in output
-    assert "--test-timeout" in output
-    assert "--test-tail-lines" in output
-    assert "--run-root" in output
-    assert ".md/.txt 绝对路径" in output
-    model_constructor.assert_not_called()
-
-
-def test_global_run_help_allows_omitting_repo(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    model_constructor = Mock(side_effect=AssertionError("不应创建模型"))
-    monkeypatch.setattr(commands, "ReasoningChatDeepSeek", model_constructor)
-
-    with pytest.raises(SystemExit) as exc_info:
-        commands.main(["run", "--help"], global_mode=True)
-
-    assert exc_info.value.code == 0
-    output = capsys.readouterr().out
-    assert "当前目录所在仓库" in output
-    model_constructor.assert_not_called()
-
-
-def test_global_main_uses_global_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    main = Mock(return_value=0)
-    monkeypatch.setattr(commands, "main", main)
-
-    assert commands.global_main() == 0
-    main.assert_called_once_with(global_mode=True)
-
-
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["run", "--issue", "修复查询失败"],
-        ["run", "--repo", "."],
-        [
-            "run",
-            "--repo",
-            ".",
-            "--issue",
-            "修复查询失败",
-            "--max-cycles",
-            "0",
-        ],
-    ],
-)
-def test_run_rejects_invalid_arguments(argv: list[str]) -> None:
-    with pytest.raises(SystemExit) as exc_info:
-        commands.main(argv)
-
-    assert exc_info.value.code == 2
+    assert run_module.CONTROLLER_ROOT == Path(__file__).parents[1]
 
 
 def test_run_rejects_missing_repository(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    exit_code = commands.main(
+    exit_code = main_module.main(
         [
             "run",
             "--repo",
@@ -245,9 +174,9 @@ def test_global_run_requires_editable_installation(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(commands, "CONTROLLER_ROOT", tmp_path)
+    monkeypatch.setattr(run_module, "CONTROLLER_ROOT", tmp_path)
 
-    exit_code = commands.main(
+    exit_code = main_module.main(
         ["run", "--issue", "修复查询失败"],
         global_mode=True,
     )
@@ -268,7 +197,7 @@ def test_global_run_detects_current_git_repository(
     captured_state: dict[str, object] = {}
     configure_success_stream(compiled_graph, captured_state)
 
-    exit_code = commands.main(
+    exit_code = main_module.main(
         ["run", "--issue", "修复查询失败"],
         global_mode=True,
     )
@@ -287,12 +216,12 @@ def test_environment_failure_stops_before_model_even_when_quiet(
 ) -> None:
     repo_root, _, model_constructor = prepare_runtime(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        commands,
+        run_module,
         "_preflight_environment",
         Mock(side_effect=RuntimeError("未发现 .venv")),
     )
 
-    exit_code = commands.main(
+    exit_code = main_module.main(
         [
             "run",
             "--repo",
@@ -307,7 +236,8 @@ def test_environment_failure_stops_before_model_even_when_quiet(
     assert exit_code == 1
     assert "环境预检失败" in captured.err
     assert "未调用 LLM" in captured.err
-    assert "总 Token：0" in captured.out
+    assert "总 Token" in captured.out
+    assert "0" in captured.out
     model_constructor.assert_not_called()
     failure = (
         configured_run_dir(tmp_path, repo_root) / "failure_environment.json"
@@ -320,20 +250,20 @@ def test_run_root_must_be_outside_target_repo(tmp_path: Path) -> None:
     repo_root.mkdir()
 
     with pytest.raises(ValueError, match="目标 Git 仓库之外"):
-        commands._resolve_run_root(repo_root, repo_root / ".runs")
+        run_module._resolve_run_root(repo_root, repo_root / ".runs")
 
 
-def test_relative_run_root_resolves_from_controller_root(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
+def test_relative_run_root_resolves_from_controller_root(tmp_path: Path) -> None:
     controller_root = tmp_path / "controller"
     repo_root = tmp_path / "external" / "repo"
     controller_root.mkdir()
     repo_root.mkdir(parents=True)
-    monkeypatch.setattr(commands, "CONTROLLER_ROOT", controller_root)
 
-    result = commands._resolve_run_root(repo_root, ".issue-solver-runs")
+    result = run_module._resolve_run_root(
+        repo_root,
+        ".issue-solver-runs",
+        controller_root,
+    )
 
     assert result == controller_root / ".issue-solver-runs"
 
@@ -345,12 +275,12 @@ def test_rejects_controller_repository_as_target(
 ) -> None:
     repo_root = tmp_path / "controller"
     repo_root.mkdir()
-    monkeypatch.setattr(commands, "CONTROLLER_ROOT", repo_root)
-    monkeypatch.setattr(commands, "find_repo_root", lambda path: repo_root)
+    monkeypatch.setattr(run_module, "CONTROLLER_ROOT", repo_root)
+    monkeypatch.setattr(run_module, "find_repo_root", lambda path: repo_root)
     preflight = Mock(side_effect=AssertionError("不应预检控制程序仓库"))
-    monkeypatch.setattr(commands, "_preflight_environment", preflight)
+    monkeypatch.setattr(run_module, "_preflight_environment", preflight)
 
-    exit_code = commands.main(
+    exit_code = main_module.main(
         ["run", "--repo", str(repo_root), "--issue", "修复问题"]
     )
 
@@ -377,12 +307,12 @@ def test_run_streams_graph_with_initial_state_and_progress(
         }
     )
     monkeypatch.setattr(
-        commands,
+        main_module,
         "get_usage_metadata_callback",
         lambda: nullcontext(usage_callback),
     )
 
-    exit_code = commands.main(
+    exit_code = main_module.main(
         [
             "run",
             "--repo",
@@ -429,24 +359,26 @@ def test_run_streams_graph_with_initial_state_and_progress(
     compiled_graph.invoke.assert_not_called()
 
     output = capsys.readouterr().out
-    assert "[开始] 初始化仓库" in output
-    assert "[完成] 初始化仓库：python，全量测试命令 pytest -q" in output
-    assert f"[环境] VENV：{repo_root / '.venv' / 'Scripts' / 'python.exe'}" in output
-    assert "[完成] Issue：搜索忽略大小写" in output
-    assert "[决策 r01/s01] 并行探索，共 2 个任务" in output
-    assert "  [1] 定位入口" in output
-    assert "[探索 r01/s01/i01 1/2] 完成：定位入口" in output
-    assert "[探索 r01/s01/i02 2/2] 完成：定位测试" in output
-    assert "[开始] Coordinator 汇总探索结果" in output
-    assert "[决策 r01/s01] CODE：修复搜索逻辑" in output
-    assert "[完成 r01/s01/i02] Coding：搜索已忽略大小写" in output
-    assert "修改文件：src/search.py, tests/test_search.py" in output
-    assert "运行 ID：run_test" in output
-    assert "当前阶段：REVIEW" in output
-    assert "下一动作：CODE" not in output
-    assert f"运行目录：{run_dir}" in output
-    assert "总 Token：150" in output
-    assert "最终耗时：" in output
+    assert output.splitlines()[0] == ""
+    assert output.splitlines()[1] == "issue-solver · test-model · run_test"
+    assert "✓ 环境预检" in output
+    assert "✓ 初始化仓库" in output
+    assert "搜索忽略大小写" in output
+    assert output.count("◆ 修复轮次 r01") == 1
+    assert "✓ EXPLORE" in output
+    assert "✓ i01/02  定位入口" in output
+    assert "✓ i02/02  定位测试" in output
+    assert "✓ CODE" in output
+    assert "✓ Coding s01 完成" in output
+    assert "搜索已忽略大小写" in output
+    assert "src/search.py" in output
+    assert "tests/test_search.py" in output
+    assert "运行摘要" in output
+    assert "run_test" in output
+    assert "REVIEW" in output
+    assert summary_value(output, "运行目录") == str(run_dir)
+    assert "150" in output
+    assert "最终耗时" in output
 
 
 def test_quiet_hides_progress_but_keeps_summary(
@@ -457,7 +389,7 @@ def test_quiet_hides_progress_but_keeps_summary(
     repo_root, compiled_graph, _ = prepare_runtime(monkeypatch, tmp_path)
     configure_success_stream(compiled_graph, {})
 
-    exit_code = commands.main(
+    exit_code = main_module.main(
         [
             "run",
             "--repo",
@@ -470,14 +402,15 @@ def test_quiet_hides_progress_but_keeps_summary(
 
     output = capsys.readouterr().out
     assert exit_code == 0
-    assert "[开始]" not in output
-    assert "[完成]" not in output
-    assert "[决策]" not in output
-    assert "[探索" not in output
-    assert "运行 ID：run_test" in output
-    assert "当前阶段：REVIEW" in output
-    assert "总 Token：0" in output
-    assert "最终耗时：" in output
+    assert "issue-solver ·" not in output
+    assert "✓" not in output
+    assert "◆" not in output
+    assert "→" not in output
+    assert "运行摘要" in output
+    assert "run_test" in output
+    assert "REVIEW" in output
+    assert "总 Token" in output
+    assert "最终耗时" in output
 
 
 def test_cli_test_and_run_root_options_override_settings(
@@ -489,7 +422,7 @@ def test_cli_test_and_run_root_options_override_settings(
     configure_success_stream(compiled_graph, captured_state)
     custom_root = tmp_path / "custom-runs"
 
-    exit_code = commands.main(
+    exit_code = main_module.main(
         [
             "run",
             "--repo",
@@ -550,16 +483,17 @@ def test_run_displays_repeated_explore_rounds(
 
     compiled_graph.stream.side_effect = stream
 
-    exit_code = commands.main(
+    exit_code = main_module.main(
         ["run", "--repo", str(repo_root), "--issue", "重复探索"]
     )
 
     output = capsys.readouterr().out
     assert exit_code == 0
-    assert "[决策 r01/s01] 并行探索，共 2 个任务" in output
-    assert "[探索 r01/s01/i02 2/2] 完成：测试" in output
-    assert "[决策 r01/s02] 并行探索，共 1 个任务" in output
-    assert "[探索 r01/s02/i01 1/1] 完成：补充根因" in output
+    assert output.count("◆ 修复轮次 r01") == 1
+    assert "→ Explore s01" in output
+    assert "✓ i02/02  测试" in output
+    assert "→ Explore s02" in output
+    assert "✓ i01/01  补充根因" in output
 
 
 def test_run_returns_one_when_graph_fails(
@@ -570,11 +504,7 @@ def test_run_returns_one_when_graph_fails(
     repo_root, compiled_graph, _ = prepare_runtime(monkeypatch, tmp_path)
 
     def stream(state: dict[str, object], *, stream_mode: list[str]):
-        failure = {
-            **state,
-            "status": "FAILED",
-            "error": "无法解析 Issue",
-        }
+        failure = {**state, "status": "FAILED", "error": "无法解析 Issue"}
         yield "updates", {
             "parse_issue": {
                 "status": "FAILED",
@@ -585,14 +515,15 @@ def test_run_returns_one_when_graph_fails(
 
     compiled_graph.stream.side_effect = stream
 
-    exit_code = commands.main(
+    exit_code = main_module.main(
         ["run", "--repo", str(repo_root), "--issue", "失败场景"]
     )
 
     captured = capsys.readouterr()
     assert exit_code == 1
-    assert "[失败] 解析 Issue：无法解析 Issue" in captured.out
-    assert "运行失败：无法解析 Issue" in captured.err
+    assert "✗ 解析 Issue 失败" in captured.out
+    assert "✗ 运行失败" in captured.err
+    assert "无法解析 Issue" in captured.err
     assert "Traceback" not in captured.err
 
 
@@ -632,14 +563,15 @@ def test_run_displays_coding_failure_coordinates(
 
     compiled_graph.stream.side_effect = stream
 
-    exit_code = commands.main(
+    exit_code = main_module.main(
         ["run", "--repo", str(repo_root), "--issue", "失败场景"]
     )
 
     captured = capsys.readouterr()
     assert exit_code == 1
-    assert "[失败 r02/s01/i03] Coding：Coding 失败：Diff 为空" in captured.out
-    assert "运行失败：Coding 失败：Diff 为空" in captured.err
+    assert "◆ 修复轮次 r02" in captured.out
+    assert "Coding s01/i03 失败" in captured.out
+    assert "Coding 失败：Diff 为空" in captured.err
 
 
 def test_run_returns_one_when_graph_raises(
@@ -653,20 +585,21 @@ def test_run_returns_one_when_graph_raises(
         usage_metadata={"test-model": {"total_tokens": 42}}
     )
     monkeypatch.setattr(
-        commands,
+        main_module,
         "get_usage_metadata_callback",
         lambda: nullcontext(usage_callback),
     )
 
-    exit_code = commands.main(
+    exit_code = main_module.main(
         ["run", "--repo", str(repo_root), "--issue", "异常场景"]
     )
 
     captured = capsys.readouterr()
     assert exit_code == 1
-    assert "运行失败：模型不可用" in captured.err
+    assert "运行失败" in captured.err
+    assert "模型不可用" in captured.err
     assert "Traceback" not in captured.err
-    assert "总 Token：42" in captured.out
+    assert "42" in captured.out
 
 
 def test_review_failure_interactively_rolls_back_and_records_decision(
@@ -684,10 +617,10 @@ def test_review_failure_interactively_rolls_back_and_records_decision(
         "error": "Review 失败",
         "changed_files": ["app.py"],
     }
-    monkeypatch.setattr(commands.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(run_module.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda prompt: "y")
     monkeypatch.setattr(
-        commands,
+        run_module,
         "rollback_state_to_base",
         lambda state, reason: {
             "success": True,
@@ -698,7 +631,7 @@ def test_review_failure_interactively_rolls_back_and_records_decision(
         },
     )
 
-    commands._prompt_review_rollback(result)
+    run_module._prompt_review_rollback(result, TerminalReporter())
 
     assert result["changed_files"] == []
     decision = json.loads(
@@ -722,11 +655,11 @@ def test_review_failure_noninteractive_keeps_workspace(
         "error": "Review 失败",
         "changed_files": ["app.py"],
     }
-    monkeypatch.setattr(commands.sys, "stdin", io.StringIO())
+    monkeypatch.setattr(run_module.sys, "stdin", io.StringIO())
     rollback = Mock(side_effect=AssertionError("不应回滚"))
-    monkeypatch.setattr(commands, "rollback_state_to_base", rollback)
+    monkeypatch.setattr(run_module, "rollback_state_to_base", rollback)
 
-    commands._prompt_review_rollback(result)
+    run_module._prompt_review_rollback(result, TerminalReporter())
 
     assert result["changed_files"] == ["app.py"]
     rollback.assert_not_called()

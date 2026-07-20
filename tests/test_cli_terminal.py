@@ -1,0 +1,333 @@
+from io import StringIO
+from pathlib import Path
+from types import SimpleNamespace
+
+from cli.terminal import TerminalReporter
+from schemas.environment_info import EnvironmentInfo
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.value = 0.0
+
+    def __call__(self) -> float:
+        return self.value
+
+    def advance(self, seconds: float) -> None:
+        self.value += seconds
+
+
+def environment() -> EnvironmentInfo:
+    return EnvironmentInfo(
+        kind="VENV",
+        root_path="E:/repo/.venv",
+        python_executable="E:/repo/.venv/Scripts/python.exe",
+        pytest_version="pytest 9.1.1",
+        source=".venv",
+    )
+
+
+def detail_value(rendered: str, label: str) -> str:
+    lines = rendered.splitlines()
+    for index, line in enumerate(lines):
+        if not line.startswith("  │ ") or label not in line:
+            continue
+        value = line.split(label, 1)[1].lstrip()
+        continuation = "  │ " + " " * 10
+        for following in lines[index + 1 :]:
+            if not following.startswith(continuation):
+                break
+            value += following[len(continuation) :]
+        return value
+    raise AssertionError(f"未找到详情字段：{label}")
+
+
+def test_header_combines_program_model_and_run_id() -> None:
+    output = StringIO()
+    reporter = TerminalReporter(stdout=output, width=72)
+
+    reporter.begin_run(
+        model_name="deepseek-reasoner",
+        run_id="run_test",
+        repo_path="E:/repo",
+        run_dir="E:/runs/run_test",
+    )
+
+    assert output.getvalue().splitlines()[0] == (
+        "issue-solver · deepseek-reasoner · run_test"
+    )
+    assert "目标仓库  E:/repo" in output.getvalue()
+
+
+def test_reporter_groups_rounds_and_records_stage_durations() -> None:
+    output = StringIO()
+    clock = FakeClock()
+    reporter = TerminalReporter(stdout=output, clock=clock, width=72)
+    reporter.begin_run(
+        model_name="test-model",
+        run_id="run_test",
+        repo_path="E:/repo",
+        run_dir="E:/runs/run_test",
+    )
+
+    reporter.start_timing("preflight")
+    clock.advance(0.5)
+    reporter.preflight_succeeded(environment())
+    reporter.graph_started()
+    clock.advance(0.2)
+    reporter.handle_update(
+        "initialize",
+        {"project_type": "python", "test_commands": ["pytest -q"]},
+    )
+    clock.advance(2.0)
+    reporter.handle_update(
+        "parse_issue",
+        {"issue": SimpleNamespace(title="搜索忽略大小写")},
+    )
+    clock.advance(1.0)
+    reporter.handle_update(
+        "coordinator",
+        {
+            "next_action": "EXPLORE",
+            "repair_round": 1,
+            "explore_stage_call": 1,
+            "explore_focuses": ["定位入口", "定位测试"],
+        },
+    )
+    clock.advance(3.0)
+    reporter.handle_update(
+        "explore",
+        {"explore_reports": [SimpleNamespace(focus="定位入口")]},
+    )
+    clock.advance(2.0)
+    reporter.handle_update(
+        "explore",
+        {"explore_reports": [SimpleNamespace(focus="定位测试")]},
+    )
+
+    text = output.getvalue()
+    assert "✓ 环境预检 · 0.50 秒" in text
+    assert detail_value(text, "解释器") == str(
+        Path(".venv/Scripts/python.exe")
+    )
+    assert "✓ 初始化仓库 · 0.20 秒" in text
+    assert "✓ 解析 Issue · 2.00 秒" in text
+    assert text.count("◆ 修复轮次 r01") == 1
+    assert "✓ EXPLORE · 1.00 秒" in text
+    assert "✓ i01/02  定位入口" in text
+    assert "✓ i02/02  定位测试" in text
+    assert "✓ Explore s01 完成 · 5.00 秒" in text
+
+
+def test_reporter_displays_review_test_and_finalize_results() -> None:
+    output = StringIO()
+    clock = FakeClock()
+    reporter = TerminalReporter(stdout=output, clock=clock, width=72)
+    reporter.begin_run(
+        model_name="test-model",
+        run_id="run_test",
+        repo_path="E:/repo",
+        run_dir="E:/runs/run_test",
+    )
+
+    reporter.start_timing("review")
+    clock.advance(1.25)
+    reporter.handle_update(
+        "review",
+        {"review_result": SimpleNamespace(verdict="APPROVE", issues=[])},
+    )
+    clock.advance(4.5)
+    reporter.handle_update(
+        "test",
+        {
+            "latest_test_results": [
+                SimpleNamespace(
+                    status="PASSED",
+                    duration=4.25,
+                    command=(
+                        "pytest -q "
+                        "tests/test_search.py::test_ignores_case "
+                        "tests/test_search.py::test_returns_matches "
+                        "tests/test_search.py::test_preserves_order "
+                        "tests/test_search.py::test_returns_empty"
+                    ),
+                    resolved_command=[
+                        "E:/repo/.venv/Scripts/python.exe",
+                        "-m",
+                        "pytest",
+                        "-q",
+                        "--basetemp=E:/runs/run_test/basetemp",
+                    ],
+                    stdout_path="E:/runs/run_test/test.stdout.log",
+                    stderr_path="E:/runs/run_test/test.stderr.log",
+                ),
+                SimpleNamespace(
+                    status="PASSED",
+                    duration=0.2,
+                    command="pytest -q",
+                    resolved_command=[
+                        "E:/repo/.venv/Scripts/python.exe",
+                        "-m",
+                        "pytest",
+                        "-q",
+                    ],
+                    stdout_path="E:/runs/run_test/regression.stdout.log",
+                    stderr_path="E:/runs/run_test/regression.stderr.log",
+                ),
+            ]
+        },
+    )
+    clock.advance(0.75)
+    reporter.handle_update(
+        "coordinator",
+        {"next_action": "FINISH", "repair_round": 1},
+    )
+    clock.advance(0.1)
+    reporter.handle_update(
+        "finalize",
+        {"status": "FINISHED", "diff_path": "E:/runs/run_test/final.patch"},
+    )
+
+    text = output.getvalue()
+    assert "✓ APPROVE · 1.25 秒" in text
+    assert "✓ i01  定向测试 · PASSED · 4.25 秒" in text
+    assert "│ 命令：pytest -q tests/test_search.py（4 项）" in text
+    assert "✓ i02  全量回归 · PASSED · 0.20 秒" in text
+    assert "│ 命令：pytest -q" in text
+    assert ".venv/Scripts/python.exe" not in text
+    assert "--basetemp" not in text
+    assert "stdout" not in text
+    assert "stderr" not in text
+    assert "✓ Test 完成 · 4.50 秒" in text
+    assert "✓ FINISH · 0.75 秒" in text
+    assert "✓ Finalize · 0.10 秒" in text
+    assert "E:/runs/run_test/final.patch" in text
+
+
+def test_reporter_compacts_targets_from_multiple_test_files() -> None:
+    output = StringIO()
+    reporter = TerminalReporter(stdout=output, width=72)
+    reporter.start_timing("test")
+
+    reporter.handle_update(
+        "test",
+        {
+            "latest_test_results": [
+                SimpleNamespace(
+                    status="FAILED",
+                    duration=0.3,
+                    command=(
+                        "pytest -q "
+                        "tests/test_a.py::test_one "
+                        "tests/test_b.py::test_two "
+                        "tests/test_c.py::test_three "
+                        "tests/test_c.py::test_four"
+                    ),
+                )
+            ]
+        },
+    )
+
+    text = output.getvalue()
+    assert "✗ i01  定向测试 · FAILED · 0.30 秒" in text
+    assert "pytest -q tests/test_a.py 等 3 个文件（4 项）" in text
+
+
+def test_summary_keeps_model_tokens_and_result_in_quiet_mode() -> None:
+    output = StringIO()
+    reporter = TerminalReporter(quiet=True, stdout=output, width=72)
+    reporter.begin_run(
+        model_name="test-model",
+        run_id="run_test",
+        repo_path="E:/repo",
+        run_dir="E:/runs/run_test",
+    )
+    reporter.set_outcome(
+        success=True,
+        result={
+            "phase": "FINALIZE",
+            "repair_round": 1,
+            "changed_files": ["src/search.py", "tests/test_search.py"],
+            "latest_test_results": [SimpleNamespace(status="PASSED")],
+        },
+        worktree_status="保留修改",
+    )
+
+    reporter.summary(total_tokens=18742, total_duration=48.09)
+
+    text = output.getvalue()
+    assert "issue-solver" not in text
+    assert "运行摘要" in text
+    assert "成功" in text
+    assert "test-model" in text
+    assert "run_test" in text
+    assert "保留修改" in text
+    assert "18,742" in text
+    assert "48.09 秒" in text
+
+
+def test_error_block_uses_stderr() -> None:
+    output = StringIO()
+    errors = StringIO()
+    reporter = TerminalReporter(stdout=output, stderr=errors)
+
+    reporter.error_block("运行失败", [("原因", "模型不可用")])
+
+    assert output.getvalue() == ""
+    assert errors.getvalue() == "✗ 运行失败\n  │ 原因：模型不可用\n"
+
+
+def test_reporter_adds_one_blank_line_before_first_output() -> None:
+    output = StringIO()
+    errors = StringIO()
+    reporter = TerminalReporter(
+        stdout=output,
+        stderr=errors,
+        leading_blank=True,
+    )
+
+    reporter.error_block("运行失败", [("原因", "模型不可用")])
+
+    assert output.getvalue() == ""
+    assert errors.getvalue() == "\n✗ 运行失败\n  │ 原因：模型不可用\n"
+
+
+def test_quiet_summary_does_not_duplicate_leading_blank() -> None:
+    output = StringIO()
+    reporter = TerminalReporter(
+        quiet=True,
+        stdout=output,
+        leading_blank=True,
+        width=72,
+    )
+
+    reporter.summary(total_tokens=0, total_duration=0.04)
+
+    assert output.getvalue().startswith("\n─")
+    assert not output.getvalue().startswith("\n\n")
+
+
+def test_details_wrap_without_truncating_long_values() -> None:
+    output = StringIO()
+    reporter = TerminalReporter(stdout=output, width=48)
+    long_path = "E:/very/long/project/path/that/must/remain/complete/output.log"
+
+    reporter.begin_run(
+        model_name="test-model",
+        run_id="run_test",
+        repo_path="E:/repo",
+        run_dir="E:/runs/run_test",
+    )
+    reporter.start_timing("preflight")
+    reporter.preflight_succeeded(
+        EnvironmentInfo(
+            kind="VENV",
+            root_path="E:/repo/.venv",
+            python_executable=long_path,
+            pytest_version="pytest 9.1.1",
+            source=".venv",
+        )
+    )
+
+    rendered = output.getvalue()
+    assert detail_value(rendered, "解释器") == long_path

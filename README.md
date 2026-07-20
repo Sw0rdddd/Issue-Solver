@@ -54,13 +54,13 @@ git -C <target-repo> status --short
 在本项目内显式指定目标仓库：
 
 ```powershell
-python -m cli.commands run --repo <target-repo> --issue <issue-url-or-text>
+python -m cli.main run --repo <target-repo> --issue <issue-url-or-text>
 ```
 
 也可使用本地 Markdown 或文本 Issue，但路径必须是绝对路径：
 
 ```powershell
-python -m cli.commands run --repo <target-repo> --issue "E:\path\to\ISSUE.md"
+python -m cli.main run --repo <target-repo> --issue "E:\path\to\ISSUE.md"
 ```
 
 全局命令仅支持可编辑安装：

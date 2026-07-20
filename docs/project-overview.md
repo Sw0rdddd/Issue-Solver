@@ -52,7 +52,7 @@ Issue 输入
 
 ```powershell
 # 在 issue-solver 源码目录中运行，必须显式传入目标仓库
-python -m cli.commands run --repo <target-repo> --issue <issue-url-or-text>
+python -m cli.main run --repo <target-repo> --issue <issue-url-or-text>
 
 # 可编辑安装后，在目标仓库或其子目录中运行
 issue-solver run --issue <issue-url-or-text>
@@ -113,7 +113,7 @@ START
 
 ### 5.1 CLI 与环境预检
 
-`src/cli/commands.py` 先创建独立的运行目录，随后在**调用模型之前**执行环境预检。预检只查找目标仓库根目录的 `.venv`、`venv` 或 `.conda`，并要求：
+`src/cli/run.py` 先创建独立的运行目录，随后在**调用模型之前**执行环境预检。预检只查找目标仓库根目录的 `.venv`、`venv` 或 `.conda`，并要求：
 
 1. 只能有一个候选环境；
 2. 环境位于目标仓库内、不是符号链接，且已经被 Git ignore；

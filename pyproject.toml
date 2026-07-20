@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-issue-solver = "cli.commands:global_main"
+issue-solver = "cli.main:global_main"
 
 [build-system]
 requires = ["setuptools>=77"]

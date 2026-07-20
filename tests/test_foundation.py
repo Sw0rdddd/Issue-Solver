@@ -111,7 +111,7 @@ def test_project_declares_global_issue_solver_command() -> None:
     )
 
     assert pyproject["project"]["name"] == "issue-solver"
-    assert pyproject["project"]["scripts"]["issue-solver"] == "cli.commands:global_main"
+    assert pyproject["project"]["scripts"]["issue-solver"] == "cli.main:global_main"
     assert pyproject["build-system"]["build-backend"] == "setuptools.build_meta"
     assert pyproject["tool"]["setuptools"]["package-dir"] == {"": "src"}
 
