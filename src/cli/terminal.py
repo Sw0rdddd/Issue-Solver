@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from schemas.environment_info import EnvironmentInfo
+from services.report import ReportResult
 
 
 MAX_TERMINAL_WIDTH = 120
@@ -109,6 +110,7 @@ class TerminalReporter:
         self.changed_files: list[str] = []
         self.test_results: list[Any] = []
         self.worktree_status: str | None = None
+        self.report_path: str | None = None
 
         self.visible_round = 0
         self.explore_total = 0
@@ -441,6 +443,20 @@ class TerminalReporter:
             self._progress(f"✗ Finalize 失败 · {elapsed:.2f} 秒")
             self._detail("原因", update.get("error", "运行失败，工作区已保留"))
 
+    def report_completed(self, result: ReportResult) -> None:
+        elapsed = self._duration("report")
+        self.report_path = result.path
+        if result.path is None:
+            self._progress(f"✗ Report 保存失败 · {elapsed:.2f} 秒")
+            self._detail("原因", result.error or "未知错误")
+            return
+
+        if result.fallback_used:
+            self._progress(f"! Report 使用程序模板 · {elapsed:.2f} 秒")
+        else:
+            self._progress(f"✓ Report · {elapsed:.2f} 秒")
+        self._detail("报告", result.path)
+
     def error_block(self, title: str, details: Iterable[tuple[str, object]]) -> None:
         self._write(f"✗ {title}", error=True)
         for label, value in details:
@@ -495,6 +511,8 @@ class TerminalReporter:
             )
         if self.worktree_status:
             self._summary_item("工作区", self.worktree_status)
+        if self.report_path:
+            self._summary_item("报告", self.report_path)
         self._summary_item("总 Token", f"{total_tokens:,}")
         self._summary_item("最终耗时", f"{total_duration:.2f} 秒")
         if self.run_dir:

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from cli.terminal import TerminalReporter
 from schemas.environment_info import EnvironmentInfo
+from services.report import ReportResult
 
 
 class FakeClock:
@@ -325,6 +326,44 @@ def test_wide_terminal_keeps_run_directory_on_one_line() -> None:
 
     assert reporter.width == 120
     assert f"运行目录  {run_dir}" in output.getvalue().splitlines()
+
+
+def test_report_result_is_shown_in_progress_and_summary() -> None:
+    output = StringIO()
+    reporter = TerminalReporter(stdout=output, width=120)
+    report_path = "E:/runs/run_test/report.md"
+
+    reporter.start_timing("report")
+    reporter.report_completed(
+        ReportResult(
+            path=report_path,
+            fallback_used=False,
+        )
+    )
+    reporter.summary(total_tokens=10, total_duration=1.0)
+
+    rendered = output.getvalue()
+    assert "✓ Report" in rendered
+    assert f"报告      {report_path}" in rendered
+
+
+def test_report_fallback_is_hidden_from_quiet_progress() -> None:
+    output = StringIO()
+    reporter = TerminalReporter(quiet=True, stdout=output, width=120)
+
+    reporter.start_timing("report")
+    reporter.report_completed(
+        ReportResult(
+            path="E:/runs/run_test/report.md",
+            fallback_used=True,
+            error="模型不可用",
+        )
+    )
+    reporter.summary(total_tokens=0, total_duration=1.0)
+
+    rendered = output.getvalue()
+    assert "使用程序模板" not in rendered
+    assert "报告      E:/runs/run_test/report.md" in rendered
 
 
 def test_details_wrap_without_truncating_long_values() -> None:

@@ -13,6 +13,7 @@ from services.python_environment import discover_python_environment
 from services.repository import find_repo_root
 from services.run_store import create_run_id
 
+from cli.report import RunReportSession
 from cli.terminal import TerminalReporter
 
 
@@ -167,6 +168,20 @@ def run_command(
         repo_path=repo_root,
         run_dir=run_dir,
     )
+    report_session = RunReportSession(
+        run_dir=run_dir,
+        model_name=model_name,
+        reporter=reporter,
+    )
+    report_state: dict[str, Any] = {
+        "run_id": run_id,
+        "phase": "INITIALIZE",
+        "status": "RUNNING",
+        "cycle": 0,
+        "repo_path": str(repo_root),
+        "run_dir": str(run_dir),
+        "issue_input": args.issue,
+    }
 
     reporter.start_timing("preflight")
     try:
@@ -200,73 +215,103 @@ def run_command(
             phase="INITIALIZE",
             worktree_status="未修改",
         )
+        report_session.finish(
+            state={
+                **report_state,
+                "status": "FAILED",
+                "error": error,
+            },
+            model=None,
+            worktree_status="未修改",
+        )
         return 1
 
     reporter.preflight_succeeded(environment)
-    if not model_name:
-        raise ValueError("配置 MODEL_NAME 不能为空。")
-    if not setting.API_KEY:
-        raise ValueError("配置 API_KEY 不能为空。")
-    if not setting.BASE_URL:
-        raise ValueError("配置 BASE_URL 不能为空。")
-    model = ReasoningChatDeepSeek(
-        model=model_name,
-        api_key=setting.API_KEY,
-        base_url=setting.BASE_URL,
-    )
-    graph = build_graph(model).compile()
-
-    initial_state = {
-        "run_id": run_id,
-        "phase": "INITIALIZE",
-        "status": "RUNNING",
-        "cycle": 0,
-        "repo_path": str(repo_root),
-        "run_dir": str(run_dir),
-        "issue_input": args.issue,
-        "max_cycles": args.max_cycles or setting.MAX_CYCLES,
-        "test_timeout": args.test_timeout or setting.TEST_TIMEOUT,
-        "test_tail_lines": args.test_tail_lines or setting.TEST_TAIL_LINES,
-        "environment": environment,
-        "explore_reports": [],
-        "explore_errors": [],
-        "test_results": [],
-        "latest_test_results": [],
-        "explore_stage_call": 0,
-        "coding_stage_call": 0,
-    }
-    result = None
-    reporter.graph_started()
-
-    for mode, event in graph.stream(
-        initial_state,
-        stream_mode=["updates", "values"],
-    ):
-        if mode == "values":
-            result = event
-            continue
-        for node, update in event.items():
-            reporter.handle_update(node, update)
-
-    if result is None:
-        raise RuntimeError("工作流未返回最终状态。")
-
-    if result.get("status") == "FAILED":
-        _prompt_review_rollback(result, reporter)
-        reporter.error_block(
-            "运行失败",
-            [("原因", result.get("error", "工作流未提供失败原因。"))],
+    report_state["environment"] = environment
+    model = None
+    try:
+        if not model_name:
+            raise ValueError("配置 MODEL_NAME 不能为空。")
+        if not setting.API_KEY:
+            raise ValueError("配置 API_KEY 不能为空。")
+        if not setting.BASE_URL:
+            raise ValueError("配置 BASE_URL 不能为空。")
+        model = ReasoningChatDeepSeek(
+            model=model_name,
+            api_key=setting.API_KEY,
+            base_url=setting.BASE_URL,
         )
+        graph = build_graph(model).compile()
+
+        initial_state = {
+            **report_state,
+            "max_cycles": args.max_cycles or setting.MAX_CYCLES,
+            "test_timeout": args.test_timeout or setting.TEST_TIMEOUT,
+            "test_tail_lines": args.test_tail_lines or setting.TEST_TAIL_LINES,
+            "explore_reports": [],
+            "explore_errors": [],
+            "test_results": [],
+            "latest_test_results": [],
+            "explore_stage_call": 0,
+            "coding_stage_call": 0,
+        }
+        result = None
+        reporter.graph_started()
+
+        for mode, event in graph.stream(
+            initial_state,
+            stream_mode=["updates", "values"],
+        ):
+            if mode == "values":
+                result = event
+                report_state = dict(event)
+                continue
+            for node, update in event.items():
+                reporter.handle_update(node, update)
+
+        if result is None:
+            raise RuntimeError("工作流未返回最终状态。")
+
+        if result.get("status") == "FAILED":
+            _prompt_review_rollback(result, reporter)
+            worktree_status = _worktree_status(result)
+            reporter.error_block(
+                "运行失败",
+                [("原因", result.get("error", "工作流未提供失败原因。"))],
+            )
+            reporter.set_outcome(
+                success=False,
+                result=result,
+                worktree_status=worktree_status,
+            )
+            report_session.finish(
+                state=result,
+                model=model,
+                worktree_status=worktree_status,
+            )
+            return 1
+
+        worktree_status = _worktree_status(result)
         reporter.set_outcome(
-            success=False,
+            success=True,
             result=result,
-            worktree_status=_worktree_status(result),
+            worktree_status=worktree_status,
         )
-        return 1
+        report_session.finish(
+            state={**result, "status": "FINISHED"},
+            model=model,
+            worktree_status=worktree_status,
+        )
+        return 0
 
-    reporter.set_outcome(
-        success=True,
-        result=result,
-        worktree_status=_worktree_status(result),
-    )
-    return 0
+    except Exception as exc:
+        report_session.finish(
+            state={
+                **report_state,
+                "status": "FAILED",
+                "error": str(exc),
+            },
+            model=model,
+            worktree_status=_worktree_status(report_state) or "未知",
+        )
+        raise

@@ -8,10 +8,12 @@ from unittest.mock import Mock
 import pytest
 
 from cli import main as main_module
+from cli import report as report_module
 from cli import run as run_module
 from cli.terminal import TerminalReporter
 from config import Setting
 from schemas.environment_info import EnvironmentInfo
+from services.report import ReportResult
 
 
 def prepare_runtime(
@@ -50,6 +52,22 @@ def prepare_runtime(
         run_module,
         "build_graph",
         Mock(return_value=graph_builder),
+    )
+    monkeypatch.setattr(
+        report_module,
+        "build_report_agent",
+        Mock(return_value=object()),
+    )
+
+    def write_report(**kwargs) -> ReportResult:
+        path = Path(kwargs["run_dir"]) / "report.md"
+        path.write_text("# 测试报告\n", encoding="utf-8")
+        return ReportResult(path=str(path), fallback_used=False)
+
+    monkeypatch.setattr(
+        report_module,
+        "create_run_report",
+        Mock(side_effect=write_report),
     )
 
     return repo_root, compiled_graph, model_constructor
@@ -243,6 +261,11 @@ def test_environment_failure_stops_before_model_even_when_quiet(
         configured_run_dir(tmp_path, repo_root) / "failure_environment.json"
     )
     assert failure.is_file()
+    report_path = configured_run_dir(tmp_path, repo_root) / "report.md"
+    assert report_path.is_file()
+    report_call = report_module.create_run_report.call_args.kwargs
+    assert report_call["report_agent"] is None
+    assert report_call["state"]["status"] == "FAILED"
 
 
 def test_run_root_must_be_outside_target_repo(tmp_path: Path) -> None:
@@ -377,6 +400,7 @@ def test_run_streams_graph_with_initial_state_and_progress(
     assert "run_test" in output
     assert "REVIEW" in output
     assert summary_value(output, "运行目录") == str(run_dir)
+    assert summary_value(output, "报告") == str(run_dir / "report.md")
     assert "150" in output
     assert "最终耗时" in output
 
@@ -600,6 +624,42 @@ def test_run_returns_one_when_graph_raises(
     assert "模型不可用" in captured.err
     assert "Traceback" not in captured.err
     assert "42" in captured.out
+    report_call = report_module.create_run_report.call_args.kwargs
+    assert report_call["state"]["status"] == "FAILED"
+    assert report_call["state"]["error"] == "模型不可用"
+
+
+def test_failed_run_reports_after_rollback_decision(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo_root, compiled_graph, _ = prepare_runtime(monkeypatch, tmp_path)
+
+    def stream(state: dict[str, object], *, stream_mode: list[str]):
+        result = {
+            **state,
+            "phase": "REVIEW",
+            "status": "FAILED",
+            "error": "Review 失败",
+            "rollback_prompt_required": True,
+            "changed_files": ["app.py"],
+        }
+        yield "values", result
+
+    def rollback(result: dict, reporter: TerminalReporter) -> None:
+        result["changed_files"] = []
+
+    compiled_graph.stream.side_effect = stream
+    monkeypatch.setattr(run_module, "_prompt_review_rollback", rollback)
+
+    exit_code = main_module.main(
+        ["run", "--repo", str(repo_root), "--issue", "失败场景"]
+    )
+
+    assert exit_code == 1
+    report_call = report_module.create_run_report.call_args.kwargs
+    assert report_call["state"]["changed_files"] == []
+    assert report_call["worktree_status"] == "已回滚"
 
 
 def test_review_failure_interactively_rolls_back_and_records_decision(

@@ -81,6 +81,7 @@ issue-solver run --issue <issue-url-or-text>
 
 - 配置文件始终是本项目根目录的 `.env`；
 - 两种命令的运行日志默认都位于 `.issue-solver-runs/<repo>/<run-id>/`；
+- 每次创建运行目录后都会生成 `report.md`；模型总结不可用时自动使用程序模板；
 - `RUN_ROOT` 可在 `.env` 配置，`--run-root` 可临时覆盖；运行日志不得写入目标仓库。
 
 完整的架构、运行逻辑、核心数据结构与设计取舍见[项目说明](docs/project-overview.md)。
