@@ -7,11 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from config import Setting
+from config import PROJECT_ROOT, Setting
 from services.run_store import create_run_id
 
 
 RUN_ID_PATTERN = re.compile(r"^run_[0-9A-HJKMNP-TV-Z]{26}$")
+
+
+def test_project_root_matches_repository_root() -> None:
+    assert PROJECT_ROOT == Path(__file__).parents[1]
 
 
 def test_setting_reflects_loaded_environment() -> None:
@@ -92,7 +96,7 @@ def test_dotenv_is_loaded_from_project_root_not_current_directory(
     result = subprocess.run(
         [sys.executable, "-c", "from config import Setting; print(Setting().MAX_CYCLES)"],
         cwd=target_repo,
-        env={**os.environ, "PYTHONPATH": str(Path(__file__).parents[1])},
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).parents[1] / "src")},
         capture_output=True,
         text=True,
         check=True,
@@ -109,6 +113,7 @@ def test_project_declares_global_issue_solver_command() -> None:
     assert pyproject["project"]["name"] == "issue-solver"
     assert pyproject["project"]["scripts"]["issue-solver"] == "cli.commands:global_main"
     assert pyproject["build-system"]["build-backend"] == "setuptools.build_meta"
+    assert pyproject["tool"]["setuptools"]["package-dir"] == {"": "src"}
 
 
 def test_create_run_id_returns_unique_ulids() -> None:

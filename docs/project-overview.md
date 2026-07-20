@@ -75,19 +75,20 @@ issue-solver run --issue <issue-url-or-text>
 ### 4.1 分层与职责边界
 
 ```text
-cli/          命令行参数、环境预检、终端可视化、交互式回滚确认
-graph/        LangGraph 状态定义、路由规则、节点连接
-nodes/        每一个工作流步骤的确定性编排和状态更新
-agents/       给 LLM 的角色、工具集合、结构化输出策略
-prompts/      各角色的系统提示词与上下文组装
-schemas/      Pydantic 数据契约与跨字段校验
-tools/        只读仓库工具、Git 查看工具、受限 Patch 修改工具
-services/     Issue 加载、项目检测、环境发现、测试执行、产物落盘
+src/
+├── cli/       命令行参数、环境预检、终端可视化、交互式回滚确认
+├── graph/     LangGraph 状态定义、路由规则、节点连接
+├── nodes/     每一个工作流步骤的确定性编排和状态更新
+├── agents/    给 LLM 的角色、工具集合、结构化输出策略
+├── prompts/   各角色的系统提示词与上下文组装
+├── schemas/   Pydantic 数据契约与跨字段校验
+├── tools/     只读仓库工具、Git 查看工具、受限 Patch 修改工具
+└── services/  Issue 加载、项目检测、环境发现、测试执行、产物落盘
 ```
 
 核心设计原则是：**LLM 负责判断和生成结构化意图；程序负责权限、状态转移、文件写入、测试执行和最终准入。**
 
-例如，Coding Agent 可以说“我改了三个文件”，但 `nodes/coding.py` 仍会调用确定性的 `inspect_coding_changes`，确认真实 Diff 非空、真实文件列表与 `CodingResult.changed_files` 完全一致后，才允许进入 Review。模型输出不是系统事实，Git 快照和测试进程结果才是。
+例如，Coding Agent 可以说“我改了三个文件”，但 `src/nodes/coding.py` 仍会调用确定性的 `inspect_coding_changes`，确认真实 Diff 非空、真实文件列表与 `CodingResult.changed_files` 完全一致后，才允许进入 Review。模型输出不是系统事实，Git 快照和测试进程结果才是。
 
 ### 4.2 为什么采用状态图
 
@@ -112,7 +113,7 @@ START
 
 ### 5.1 CLI 与环境预检
 
-`cli/commands.py` 先创建独立的运行目录，随后在**调用模型之前**执行环境预检。预检只查找目标仓库根目录的 `.venv`、`venv` 或 `.conda`，并要求：
+`src/cli/commands.py` 先创建独立的运行目录，随后在**调用模型之前**执行环境预检。预检只查找目标仓库根目录的 `.venv`、`venv` 或 `.conda`，并要求：
 
 1. 只能有一个候选环境；
 2. 环境位于目标仓库内、不是符号链接，且已经被 Git ignore；
@@ -133,7 +134,7 @@ START
 
 ### 5.3 Issue 规范化
 
-`parse_issue` 节点先由 `services/issue_loader.py` 读取原始输入，再让模型输出 `IssueSpec`。它将不稳定的自然语言统一成标题、原始描述、期望行为、实际行为和验收条件，后续角色不必反复从原文猜测任务。
+`parse_issue` 节点先由 `src/services/issue_loader.py` 读取原始输入，再让模型输出 `IssueSpec`。它将不稳定的自然语言统一成标题、原始描述、期望行为、实际行为和验收条件，后续角色不必反复从原文猜测任务。
 
 ### 5.4 Coordinator：唯一的工作流决策者
 
@@ -218,7 +219,7 @@ Review 后仍会执行真实测试，而不是只依赖 Review 结论。Coordina
 
 ### 6.1 `ResolverState`：整个工作流的单一事实来源
 
-`graph/state.py` 中的 `ResolverState` 是节点之间共享的 TypedDict。它把“当前处于什么阶段、掌握了什么证据、工作区是否有修改、是否应回滚”放进显式状态，而不是隐藏在提示词或全局变量中。
+`src/graph/state.py` 中的 `ResolverState` 是节点之间共享的 TypedDict。它把“当前处于什么阶段、掌握了什么证据、工作区是否有修改、是否应回滚”放进显式状态，而不是隐藏在提示词或全局变量中。
 
 | 分组 | 代表字段 | 作用 |
 | --- | --- | --- |

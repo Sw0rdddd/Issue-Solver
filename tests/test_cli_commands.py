@@ -133,6 +133,10 @@ def configured_run_dir(controller_root: Path, repo_root: Path) -> Path:
     return run_root / repo_root.name / "run_test"
 
 
+def test_controller_root_matches_repository_root() -> None:
+    assert commands.CONTROLLER_ROOT == Path(__file__).parents[1]
+
+
 def test_module_help_is_available() -> None:
     result = subprocess.run(
         [sys.executable, "-m", "cli.commands", "--help"],

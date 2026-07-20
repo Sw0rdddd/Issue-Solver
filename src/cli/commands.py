@@ -20,7 +20,7 @@ from services.repository import find_repo_root
 from services.run_store import create_run_id
 
 
-CONTROLLER_ROOT = Path(__file__).resolve().parents[1]
+CONTROLLER_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _total_tokens(callback: UsageMetadataCallbackHandler) -> int:
