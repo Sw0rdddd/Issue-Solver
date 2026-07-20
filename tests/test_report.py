@@ -10,6 +10,41 @@ from schemas.test_result import TestResult as SolverTestResult
 from services.report import build_report_context, create_run_report
 
 
+def valid_report_markdown() -> str:
+    return """# Issue 修复报告
+
+## 运行结果
+- 状态：FINISHED
+- 运行 ID：run_test
+- 模型：deepseek-reasoner
+- 结束阶段：FINALIZE
+- 修复轮次：1
+- 工作区：保留修改
+- 失败原因：无
+
+## 问题与根因
+- Issue：搜索忽略大小写
+- 根因：src/search.py:8 未统一大小写
+- 关键证据：
+  - src/search.py:8 直接比较原始字符串
+
+## 修改内容
+- 编码摘要：统一查询和标题的大小写
+- 修改文件：
+  - src/search.py
+
+## 验证结果
+- Review：APPROVE
+- 测试：
+  - `pytest -q tests/test_search.py`：PASSED，退出码 0，0.25 秒
+
+## 风险与交付物
+- 剩余风险：
+  - 未获得
+- 最终 Patch：E:/runs/run_test/diff.patch
+- 报告生成：模型"""
+
+
 def make_state() -> dict:
     return {
         "run_id": "run_test",
@@ -93,7 +128,7 @@ def test_report_context_excludes_full_test_logs_and_resolved_command() -> None:
 
 def test_create_run_report_writes_model_markdown(tmp_path: Path) -> None:
     captured: list[object] = []
-    markdown = "# Issue 修复报告\n\n## 运行结果\n\n成功"
+    markdown = valid_report_markdown()
 
     def invoke(messages: object) -> str:
         captured.append(messages)
@@ -134,7 +169,7 @@ def test_create_run_report_falls_back_when_agent_fails(tmp_path: Path) -> None:
     assert result.fallback_used is True
     assert result.error == "模型不可用"
     assert "## 问题与根因" in report
-    assert "模型总结失败，已使用程序模板" in report
+    assert "报告生成：程序模板（模型不可用）" in report
     assert "src/search.py:8 未统一大小写" in report
 
 
@@ -153,6 +188,26 @@ def test_create_run_report_falls_back_when_agent_returns_empty_text(
     assert result.fallback_used is True
     assert result.error == "Reporter 返回了空文本。"
     assert "## 验证结果" in report
+
+
+def test_create_run_report_falls_back_when_agent_changes_template(
+    tmp_path: Path,
+) -> None:
+    result = create_run_report(
+        run_dir=tmp_path,
+        state=make_state(),
+        model_name="deepseek-reasoner",
+        worktree_status="保留修改",
+        report_agent=RunnableLambda(
+            lambda _: "# 自定义报告\n\n模型自由发挥"
+        ),
+    )
+
+    report = (tmp_path / "report.md").read_text(encoding="utf-8")
+    assert result.fallback_used is True
+    assert result.error == "Reporter 未使用固定报告标题。"
+    assert report.startswith("# Issue 修复报告\n")
+    assert "- 报告生成：程序模板" in report
 
 
 def test_create_run_report_without_model_uses_fallback(tmp_path: Path) -> None:

@@ -7,7 +7,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable
 from pydantic import BaseModel
 
-from prompts.reporter import REPORT_SYSTEM_PROMPT, build_report_input
+from prompts.reporter import (
+    REPORT_REQUIRED_LABELS,
+    REPORT_SECTION_HEADINGS,
+    REPORT_SYSTEM_PROMPT,
+    build_report_input,
+)
 
 
 REPORT_FILENAME = "report.md"
@@ -120,7 +125,20 @@ def build_report_context(
 
 def _bullet_lines(values: list[Any]) -> list[str]:
     cleaned = [str(value).strip() for value in values if str(value).strip()]
-    return [f"- {value}" for value in cleaned] or ["- 未获得"]
+    return [f"  - {value}" for value in cleaned] or ["  - 未获得"]
+
+
+def _validate_report_format(content: str) -> None:
+    lines = content.strip().splitlines()
+    if not lines or lines[0] != "# Issue 修复报告":
+        raise ValueError("Reporter 未使用固定报告标题。")
+
+    headings = [line for line in lines if line.startswith("## ")]
+    if headings != list(REPORT_SECTION_HEADINGS):
+        raise ValueError("Reporter 未遵循固定章节顺序。")
+    for label in REPORT_REQUIRED_LABELS:
+        if not any(line.startswith(label) for line in lines):
+            raise ValueError(f"Reporter 缺少固定字段：{label}")
 
 
 def build_fallback_report(
@@ -144,19 +162,24 @@ def build_fallback_report(
         for report in context.get("explore_reports", [])
         if report.get("root_cause")
     ]
+    findings = [
+        finding
+        for report in context.get("explore_reports", [])
+        for finding in (report.get("findings") or [])
+    ]
     risks = [
         *(coding_result.get("remaining_risks") or []),
         *(review.get("remaining_risks") or []),
     ]
     test_lines = [
         (
-            f"- `{result.get('command') or '未知命令'}`："
+            f"  - `{result.get('command') or '未知命令'}`："
             f"{result.get('status') or 'UNKNOWN'}，"
             f"退出码 {result.get('exit_code', '未知')}，"
             f"{float(result.get('duration') or 0):.2f} 秒"
         )
         for result in tests
-    ] or ["- 未执行"]
+    ] or ["  - 未执行"]
 
     lines = [
         "# Issue 修复报告",
@@ -166,27 +189,35 @@ def build_fallback_report(
         f"- 运行 ID：{run.get('run_id') or '未获得'}",
         f"- 模型：{run.get('model') or '未配置'}",
         f"- 结束阶段：{run.get('phase') or '未知'}",
+        f"- 修复轮次：{run.get('repair_round', 0)}",
         f"- 工作区：{run.get('worktree_status') or '未知'}",
         f"- 失败原因：{run.get('error') or '无'}",
         "",
         "## 问题与根因",
         f"- Issue：{issue_title}",
-        *_bullet_lines(root_causes),
+        f"- 根因：{'；'.join(root_causes) if root_causes else '未获得'}",
+        "- 关键证据：",
+        *_bullet_lines(findings),
         "",
         "## 修改内容",
         f"- 编码摘要：{coding_result.get('summary') or '未获得'}",
+        "- 修改文件：",
         *_bullet_lines(coding.get("changed_files") or []),
         "",
         "## 验证结果",
         f"- Review：{review.get('verdict') or '未执行'}",
+        "- 测试：",
         *test_lines,
         "",
         "## 风险与交付物",
+        "- 剩余风险：",
         *_bullet_lines(risks),
         f"- 最终 Patch：{delivery.get('diff_path') or '未生成'}",
     ]
     if generation_error:
-        lines.append(f"- 报告生成：模型总结失败，已使用程序模板（{generation_error}）")
+        lines.append(f"- 报告生成：程序模板（{generation_error}）")
+    else:
+        lines.append("- 报告生成：程序模板")
     return "\n".join(lines).strip() + "\n"
 
 
@@ -242,6 +273,7 @@ def create_run_report(
             )
             if not isinstance(content, str) or not content.strip():
                 raise ValueError("Reporter 返回了空文本。")
+            _validate_report_format(content)
         except Exception as exc:
             generation_error = str(exc)
             fallback_used = True
