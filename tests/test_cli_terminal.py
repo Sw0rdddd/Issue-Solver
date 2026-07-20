@@ -307,6 +307,26 @@ def test_quiet_summary_does_not_duplicate_leading_blank() -> None:
     assert not output.getvalue().startswith("\n\n")
 
 
+def test_wide_terminal_keeps_run_directory_on_one_line() -> None:
+    output = StringIO()
+    run_dir = (
+        "E:\\Products\\own\\Issue-to-Solution\\.issue-solver-runs\\"
+        "search-demo\\run_01KXZZQGVFZZXF12X4GENHPN6N"
+    )
+    reporter = TerminalReporter(quiet=True, stdout=output, width=165)
+
+    reporter.begin_run(
+        model_name="test-model",
+        run_id="run_01KXZZQGVFZZXF12X4GENHPN6N",
+        repo_path="E:/repo",
+        run_dir=run_dir,
+    )
+    reporter.summary(total_tokens=0, total_duration=1.0)
+
+    assert reporter.width == 120
+    assert f"运行目录  {run_dir}" in output.getvalue().splitlines()
+
+
 def test_details_wrap_without_truncating_long_values() -> None:
     output = StringIO()
     reporter = TerminalReporter(stdout=output, width=48)

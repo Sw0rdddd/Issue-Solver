@@ -10,6 +10,9 @@ from typing import Any, TextIO
 from schemas.environment_info import EnvironmentInfo
 
 
+MAX_TERMINAL_WIDTH = 120
+
+
 def _display_width(value: str) -> int:
     width = 0
     for character in value:
@@ -87,7 +90,7 @@ class TerminalReporter:
         leading_blank: bool = False,
     ) -> None:
         detected_width = width or shutil.get_terminal_size(fallback=(72, 24)).columns
-        self.width = max(48, min(detected_width, 88))
+        self.width = max(48, min(detected_width, MAX_TERMINAL_WIDTH))
         self.quiet = quiet
         self.stdout = stdout or sys.stdout
         self.stderr = stderr or sys.stderr

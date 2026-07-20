@@ -11,18 +11,33 @@ from schemas.review_result import ReviewResult
 
 def test_build_review_agent_uses_only_read_only_tools(monkeypatch) -> None:
     captured: dict[str, object] = {}
+    created_agent = object()
     expected_agent = object()
 
     def fake_create_agent(**kwargs):
         captured.update(kwargs)
+        return created_agent
+
+    def fake_retry(agent, response_type, *, agent_name):
+        captured["retry"] = (agent, response_type, agent_name)
         return expected_agent
 
     monkeypatch.setattr(reviewer, "create_agent", fake_create_agent)
+    monkeypatch.setattr(
+        reviewer,
+        "with_agent_structured_output_retry",
+        fake_retry,
+    )
     model = object()
 
     result = reviewer.build_review_agent(model)
 
     assert result is expected_agent
+    assert captured["retry"] == (
+        created_agent,
+        ReviewResult,
+        "Review Agent",
+    )
     assert captured["model"] is model
     assert captured["tools"] == [
         reviewer.list_files,

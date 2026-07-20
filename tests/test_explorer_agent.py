@@ -6,18 +6,33 @@ from schemas.explore_report import ExploreReport
 
 def test_build_explore_agent_uses_tool_strategy(monkeypatch) -> None:
     captured: dict[str, object] = {}
+    created_agent = object()
     expected_agent = object()
 
     def fake_create_agent(**kwargs):
         captured.update(kwargs)
+        return created_agent
+
+    def fake_retry(agent, response_type, *, agent_name):
+        captured["retry"] = (agent, response_type, agent_name)
         return expected_agent
 
     monkeypatch.setattr(explorer, "create_agent", fake_create_agent)
+    monkeypatch.setattr(
+        explorer,
+        "with_agent_structured_output_retry",
+        fake_retry,
+    )
     model = object()
 
     result = explorer.build_explore_agent(model)
 
     assert result is expected_agent
+    assert captured["retry"] == (
+        created_agent,
+        ExploreReport,
+        "Explore Agent",
+    )
     assert captured["model"] is model
     assert captured["tools"] == [
         explorer.list_files,
