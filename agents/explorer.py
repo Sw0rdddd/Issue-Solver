@@ -23,6 +23,6 @@ def build_explore_agent(model: BaseChatModel):
             git_show,
         ],
         system_prompt=EXPLORE_SYSTEM_PROMPT,
-        response_format=ToolStrategy(ExploreReport),
+        response_format=ToolStrategy(ExploreReport, handle_errors=True),
         name="explore_agent",
     )

@@ -10,15 +10,18 @@ from prompts.issue_parser import (
 )
 from schemas.issue_specification import IssueSpec
 from services.issue_loader import load_issue
+from services.structured_output import with_structured_output_retry
 
 
 def build_parse_issue_node(model: BaseChatModel):
     """创建 Parse Issue 节点。"""
 
-    structured_model = model.with_structured_output(
-        IssueSpec,
-        method="function_calling",
-        strict=None,
+    structured_model = with_structured_output_retry(
+        model.with_structured_output(
+            IssueSpec,
+            method="function_calling",
+            strict=None,
+        )
     )
 
     def parse_issue_node(state: ResolverState) -> dict:

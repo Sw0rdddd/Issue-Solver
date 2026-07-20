@@ -36,6 +36,7 @@ def test_build_review_agent_uses_only_read_only_tools(monkeypatch) -> None:
     response_format = captured["response_format"]
     assert isinstance(response_format, ToolStrategy)
     assert response_format.schema is ReviewResult
+    assert response_format.handle_errors is True
 
 
 def test_review_prompt_defines_read_only_diff_workflow() -> None:

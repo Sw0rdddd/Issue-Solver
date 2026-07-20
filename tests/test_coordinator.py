@@ -53,6 +53,15 @@ class FakeModel:
         return self.structured_model
 
 
+class FakeStructuredRunnable:
+    def __init__(self) -> None:
+        self.retry_kwargs: dict[str, object] | None = None
+
+    def with_retry(self, **kwargs: object) -> "FakeStructuredRunnable":
+        self.retry_kwargs = kwargs
+        return self
+
+
 def make_issue() -> IssueSpec:
     return IssueSpec(
         title="空结果查询失败",
@@ -178,7 +187,7 @@ def test_coordinator_decision_rejects_conflicting_payload() -> None:
 
 
 def test_build_coordinator_agent_uses_decision_schema() -> None:
-    structured_model = object()
+    structured_model = FakeStructuredRunnable()
     model = FakeModel(structured_model)
 
     result = build_coordinator_agent(model)
@@ -187,6 +196,11 @@ def test_build_coordinator_agent_uses_decision_schema() -> None:
     assert model.schema is CoordinatorDecision
     assert model.method == "function_calling"
     assert model.strict is None
+    assert structured_model.retry_kwargs == {
+        "retry_if_exception_type": (ValueError,),
+        "wait_exponential_jitter": False,
+        "stop_after_attempt": 3,
+    }
 
 
 def test_coordinator_node_initially_dispatches_three_focuses() -> None:

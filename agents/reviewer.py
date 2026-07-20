@@ -22,6 +22,6 @@ def build_review_agent(model: BaseChatModel):
             git_diff,
         ],
         system_prompt=REVIEW_SYSTEM_PROMPT,
-        response_format=ToolStrategy(ReviewResult),
+        response_format=ToolStrategy(ReviewResult, handle_errors=True),
         name="review_agent",
     )

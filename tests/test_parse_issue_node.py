@@ -22,6 +22,11 @@ class FakeStructuredModel:
         self.result = result
         self.error = error
         self.messages: list[object] = []
+        self.retry_kwargs: dict[str, object] | None = None
+
+    def with_retry(self, **kwargs: object) -> "FakeStructuredModel":
+        self.retry_kwargs = kwargs
+        return self
 
     def invoke(self, messages: list[object]) -> IssueSpec:
         self.messages = messages
@@ -106,6 +111,11 @@ def test_parse_issue_node_saves_normalized_issue(
     assert model.schema is IssueSpec
     assert model.method == "function_calling"
     assert model.strict is None
+    assert structured_model.retry_kwargs == {
+        "retry_if_exception_type": (ValueError,),
+        "wait_exponential_jitter": False,
+        "stop_after_attempt": 3,
+    }
     assert result == {"issue": issue, "phase": "COORDINATE"}
     assert len(structured_model.messages) == 2
     assert isinstance(structured_model.messages[0], SystemMessage)

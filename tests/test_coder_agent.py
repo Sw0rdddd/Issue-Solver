@@ -43,6 +43,7 @@ def test_build_coding_agent_uses_only_bound_coding_tools(monkeypatch) -> None:
     response_format = captured["response_format"]
     assert isinstance(response_format, ToolStrategy)
     assert response_format.schema is CodingResult
+    assert response_format.handle_errors is True
 
 
 def test_coding_prompt_defines_safe_iterative_workflow() -> None:

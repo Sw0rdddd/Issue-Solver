@@ -28,6 +28,6 @@ def build_coding_agent(
             inspect_changes_tool,
         ],
         system_prompt=CODING_SYSTEM_PROMPT,
-        response_format=ToolStrategy(CodingResult),
+        response_format=ToolStrategy(CodingResult, handle_errors=True),
         name="coding_agent",
     )
