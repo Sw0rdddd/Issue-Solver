@@ -19,6 +19,45 @@ IGNORED_NAMES = {
     "build",
 }
 
+MAX_SEARCH_FILE_BYTES = 1_048_576
+MAX_SEARCH_FILES = 2_500
+MAX_SYMBOL_RESULTS = 150
+
+
+def _read_searchable_file(
+        repo_root: Path,
+        file_path: Path,
+) -> tuple[Path, str] | None:
+    """安全读取可搜索的仓库内 UTF-8 文本文件。"""
+
+    try:
+        if file_path.is_symlink():
+            return None
+
+        resolved_file = file_path.resolve()
+        relative_file = resolved_file.relative_to(repo_root)
+
+        if not resolved_file.is_file():
+            return None
+
+        if resolved_file.stat().st_size > MAX_SEARCH_FILE_BYTES:
+            return None
+
+        content = resolved_file.read_bytes()
+    except (OSError, ValueError):
+        return None
+
+    if len(content) > MAX_SEARCH_FILE_BYTES or b"\x00" in content:
+        return None
+
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+    return relative_file, text
+
+
 @tool
 def search_text(repo_path: str, query: str, path: str = ".", file_pattern: str = "*", case_sensitive: bool = False,
                 max_results: int = 50, ) -> str:
@@ -61,6 +100,8 @@ def search_text(repo_path: str, query: str, path: str = ".", file_pattern: str =
 
     search_query = query if case_sensitive else query.lower()
     results: list[str] = []
+    scanned_files = 0
+    scan_truncated = False
 
     for current_root, dir_names, file_names in os.walk(target):
         # 跳过依赖目录和缓存目录
@@ -76,30 +117,47 @@ def search_text(repo_path: str, query: str, path: str = ".", file_pattern: str =
 
             file_path = Path(current_root) / file_name
 
-            try:
-                lines = file_path.read_text(
-                    encoding="utf-8",
-                    errors="ignore",
-                ).splitlines()
-            except OSError:
+            if scanned_files >= MAX_SEARCH_FILES:
+                scan_truncated = True
+                break
+
+            scanned_files += 1
+            searchable_file = _read_searchable_file(repo_root, file_path)
+
+            if searchable_file is None:
                 continue
 
-            for line_number, line in enumerate(lines, start=1):
+            relative_file, text = searchable_file
+
+            for line_number, line in enumerate(text.splitlines(), start=1):
                 compared_line = line if case_sensitive else line.lower()
 
                 if search_query not in compared_line:
                     continue
 
-                relative_path = file_path.relative_to(
-                    repo_root
-                ).as_posix()
+                if len(results) >= max_results:
+                    return "\n".join([
+                        *results,
+                        f"[结果已截断，当前显示前 {max_results} 条，"
+                        f"请缩小 path 或 file_pattern]",
+                    ])
 
                 results.append(
-                    f"{relative_path}:{line_number}: {line.strip()}"
+                    f"{relative_file.as_posix()}:{line_number}: "
+                    f"{line.strip()}"
                 )
 
-                if len(results) >= max_results:
-                    return "\n".join(results)
+        if scan_truncated:
+            break
+
+    if scan_truncated:
+        truncated_message = (
+            f"[搜索已截断，当前仅扫描前 {MAX_SEARCH_FILES} 个候选文件，"
+            f"请缩小 path 或 file_pattern]"
+        )
+        if results:
+            return "\n".join([*results, truncated_message])
+        return truncated_message
 
     if not results:
         return (
@@ -113,7 +171,7 @@ def search_text(repo_path: str, query: str, path: str = ".", file_pattern: str =
 
 @tool
 def search_symbol(repo_path: str,symbol: str,path: str = ".") -> str:
-    """搜索 Python 文件中的类和函数定义。
+    """搜索 Python 文件中的类、同步函数和异步函数定义。
 
     Args:
         repo_path: Git 仓库根目录。
@@ -132,44 +190,50 @@ def search_symbol(repo_path: str,symbol: str,path: str = ".") -> str:
         return "错误：禁止搜索依赖或缓存目录。"
 
     results: list[str] = []
+    scanned_files = 0
+    scan_truncated = False
 
     for file_path in target.rglob("*.py"):
-        if any(
-            part in {
-                ".git",
-                ".venv",
-                "venv",
-                ".conda",
-                "__pycache__",
-            }
-            for part in file_path.parts
-        ):
+        try:
+            relative_candidate = file_path.relative_to(repo_root)
+        except ValueError:
             continue
 
+        if any(part in IGNORED_NAMES for part in relative_candidate.parts):
+            continue
+
+        if scanned_files >= MAX_SEARCH_FILES:
+            scan_truncated = True
+            break
+
+        scanned_files += 1
+        searchable_file = _read_searchable_file(repo_root, file_path)
+
+        if searchable_file is None:
+            continue
+
+        relative_file, source = searchable_file
+
         try:
-            source = file_path.read_text(
-                encoding="utf-8",
-                errors="ignore",
-            )
-
             tree = ast.parse(source)
-
-        except (SyntaxError, OSError):
+        except SyntaxError:
             continue
 
         for node in ast.walk(tree):
             if not isinstance(
                 node,
-                (ast.ClassDef, ast.FunctionDef),
+                (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef),
             ):
                 continue
 
             if node.name != symbol:
                 continue
 
-            relative = file_path.relative_to(
-                repo_root
-            ).as_posix()
+            if len(results) >= MAX_SYMBOL_RESULTS:
+                return "\n".join([
+                    *results,
+                    f"[结果已截断，当前显示前 {MAX_SYMBOL_RESULTS} 条]",
+                ])
 
             node_type = (
                 "class"
@@ -179,8 +243,17 @@ def search_symbol(repo_path: str,symbol: str,path: str = ".") -> str:
 
             results.append(
                 f"{node_type} {symbol} "
-                f"-> {relative}:{node.lineno}"
+                f"-> {relative_file.as_posix()}:{node.lineno}"
             )
+
+    if scan_truncated:
+        truncated_message = (
+            f"[搜索已截断，当前仅扫描前 {MAX_SEARCH_FILES} 个候选文件，"
+            f"请缩小 path]"
+        )
+        if results:
+            return "\n".join([*results, truncated_message])
+        return truncated_message
 
     if not results:
         return f"未找到符号：{symbol}"

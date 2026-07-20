@@ -25,7 +25,11 @@ def test_build_explore_agent_uses_tool_strategy(monkeypatch) -> None:
         explorer.search_text,
         explorer.search_symbol,
         explorer.git_log,
+        explorer.git_show,
     ]
     response_format = captured["response_format"]
     assert isinstance(response_format, ToolStrategy)
     assert response_format.schema is ExploreReport
+    assert "git_log" in captured["system_prompt"]
+    assert "git_show" in captured["system_prompt"]
+    assert "list_files 或搜索工具提示结果被截断" in captured["system_prompt"]

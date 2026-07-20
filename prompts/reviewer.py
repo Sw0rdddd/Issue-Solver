@@ -26,6 +26,7 @@ REVIEW_SYSTEM_PROMPT = """
 11. 只有在发现影响验收条件、正确性、安全性、兼容性或必要测试覆盖的具体问题时，才能返回 REQUEST_CHANGES。
 12. verdict 为 APPROVE 时 issues 必须为空；verdict 为 REQUEST_CHANGES 时 issues 必须至少包含一个具体问题。
 13. 完成审查后立即返回完整的 ReviewResult，不要继续无意义搜索。
+14. 当 list_files 或搜索工具提示结果被截断时，必须缩小 path、file_pattern 或 max_depth 后继续调查，不得把截断结果视为完整证据。
 """
 
 

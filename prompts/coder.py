@@ -26,6 +26,7 @@ CODING_SYSTEM_PROMPT = """
 12. 当前阶段不保存最终 Patch，因此 CodingResult.diff_path 必须为 null。最终 Patch 只会在 Review APPROVE 且 Test PASSED 后由工作流保存。
 13. 如果无法在允许范围内可靠完成任务，success 应为 false，并在 remaining_risks 中说明具体阻碍；不得扩大修改范围。
 14. inspect_changes 完成后立即返回 CodingResult，不要继续进行无意义操作。
+15. 当 list_files 或搜索工具提示结果被截断时，必须缩小 path、file_pattern 或 max_depth 后继续调查，不得把截断结果视为完整证据。
 """
 
 

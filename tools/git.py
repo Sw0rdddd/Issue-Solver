@@ -139,29 +139,52 @@ def git_log(repo_path: str,path: str = ".",limit: int = 10) -> str:
 
 
 @tool
-def git_status(repo_path: str) -> str:
-    """查看 Git 仓库当前工作区状态。
+def git_show(
+        repo_path: str,
+        commit: str,
+        path: str = ".",
+        max_chars: int = 20_000,
+) -> str:
+    """查看指定提交对仓库路径所做的修改。
 
     Args:
         repo_path: Git 仓库根目录。
+        commit: 要查看的 Commit、分支或标签。
+        path: 相对于仓库根目录的文件或目录，例如 "."、"src/main.py"。
+        max_chars: 最大返回字符数，防止输出过大。
     """
 
-    repo_root = Path(repo_path).resolve()
+    if max_chars < 1:
+        return "错误：max_chars 必须大于 0。"
 
-    if not repo_root.exists():
-        return f"错误：仓库路径不存在：{repo_path}"
+    if max_chars > 100_000:
+        return "错误：max_chars 不能大于 100000。"
+
+    repo_root = Path(repo_path).resolve()
+    target = (repo_root / path).resolve()
+
+    try:
+        relative_path = target.relative_to(repo_root)
+    except ValueError:
+        return "错误：禁止访问仓库之外的路径。"
 
     if not repo_root.is_dir():
-        return f"错误：该路径不是目录：{repo_path}"
+        return f"错误：仓库路径不存在：{repo_path}"
+
+    command = [
+        "git",
+        "show",
+        "--no-ext-diff",
+        "--format=fuller",
+        "--end-of-options",
+        commit,
+        "--",
+        relative_path.as_posix(),
+    ]
 
     try:
         result = subprocess.run(
-            [
-                "git",
-                "status",
-                "--short",
-                "--branch",
-            ],
+            command,
             cwd=repo_root,
             capture_output=True,
             text=True,
@@ -173,15 +196,19 @@ def git_status(repo_path: str) -> str:
     except FileNotFoundError:
         return "错误：未找到 Git，请先安装并配置 Git。"
     except subprocess.TimeoutExpired:
-        return "错误：git status 执行超时。"
+        return "错误：git show 执行超时。"
 
     if result.returncode != 0:
         error = result.stderr.strip() or "未知 Git 错误"
-        return f"错误：git status 执行失败：{error}"
+        return f"错误：git show 执行失败：{error}"
 
-    output = result.stdout.strip()
+    output = result.stdout
 
-    if not output:
-        return "Git 工作区干净，没有代码修改。"
+    if not output.strip():
+        return f"提交 {commit!r} 没有修改路径 {path!r}。"
+
+    if len(output) > max_chars:
+        output = output[:max_chars]
+        output += "\n\n[输出已截断，请缩小 path 范围后重新查看]"
 
     return output

@@ -153,7 +153,9 @@ Coordinator 没有文件工具，也不能执行命令；它只返回 `Coordinat
 
 ### 5.5 Explore：并行只读调查
 
-Explore Agent 只拿到 `list_files`、`read_file`、文本/符号搜索和 `git_log` 等只读工具。它输出 `ExploreReport`，其中包含相关文件、符号、代码证据、潜在根因、建议测试点和未知项。
+Explore Agent 只拿到 `list_files`、`read_file`、文本/符号搜索、`git_log` 和 `git_show` 等只读工具。它输出 `ExploreReport`，其中包含相关文件、符号、代码证据、潜在根因、建议测试点和未知项。
+
+只读目录与搜索工具同样有确定的资源和路径边界。`list_files` 默认最多返回 500 项，调用方可在 1 到 2000 项之间调整；文本和符号搜索不会读取符号链接、仓库外路径、非普通文件、超过 1 MiB 的文件、包含 NUL 的二进制内容或非 UTF-8 文件，并且单次最多检查 2500 个候选文件。符号搜索最多返回 150 条结果。工具在目录、候选文件或匹配结果超过限制时会明确标记截断；Explorer、Coder 和 Reviewer 必须缩小搜索范围后继续，不能把截断输出当作完整仓库证据。
 
 设计上，Explore 的结果不是“长篇聊天记录”，而是可供 Coordinator 和 Coder 消费的结构化证据。多个报告并行产生，状态中的 `explore_reports` 使用追加 reducer 聚合，避免一个并行分支覆盖另一个分支的结果。
 
@@ -250,7 +252,7 @@ Review 后仍会执行真实测试，而不是只依赖 Review 结论。Coordina
 | Agent | 是否可写 | 工具 | 输入重点 | 输出 |
 | --- | --- | --- | --- | --- |
 | Coordinator | 否 | 无 | Issue、探索报告、编码/审查/测试历史、循环上限 | `CoordinatorDecision` |
-| Explorer | 否 | 文件列表、读文件、文本/符号搜索、`git_log` | 一条探索目标、仓库路径 | `ExploreReport` |
+| Explorer | 否 | 文件列表、读文件、文本/符号搜索、`git_log`、`git_show` | 一条探索目标、仓库路径 | `ExploreReport` |
 | Coder | 是，且仅 Patch | 只读工具、`apply_patch`、`inspect_changes` | Issue、CodingTask、探索报告、当前摘要 | `CodingResult` |
 | Reviewer | 否 | 只读工具、`git_diff` | Issue、CodingTask、CodingResult、探索报告、base commit | `ReviewResult` |
 

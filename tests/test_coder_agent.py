@@ -55,6 +55,7 @@ def test_coding_prompt_defines_safe_iterative_workflow() -> None:
     assert "不得声称测试已经通过" in CODING_SYSTEM_PROMPT
     assert "diff_path 必须为 null" in CODING_SYSTEM_PROMPT
     assert "changed_files" in CODING_SYSTEM_PROMPT
+    assert "list_files 或搜索工具提示结果被截断" in CODING_SYSTEM_PROMPT
 
 
 def test_build_coding_input_contains_structured_context() -> None:

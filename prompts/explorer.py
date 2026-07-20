@@ -20,6 +20,8 @@ EXPLORE_SYSTEM_PROMPT = """
 10. test_targets 记录现有测试或建议新增测试的位置与场景。
 11. 不要输出代码修改方案，不要调用任何写文件或命令执行工具。
 12. 完成调查后立即返回 ExploreReport，不要继续无意义搜索。
+13. 调查历史回归时，先调用 git_log 定位可疑提交，再调用 git_show 查看该提交对相关路径的修改。
+14. 当 list_files 或搜索工具提示结果被截断时，必须缩小 path、file_pattern 或 max_depth 后继续调查，不得把截断结果视为完整证据。
 """
 
 def build_explore_input(repo_path: str,issue: IssueSpec,focus: str,current_summary: str = "") -> str:
