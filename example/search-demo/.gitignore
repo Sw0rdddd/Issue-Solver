@@ -1,0 +1,10 @@
+# Python 环境与缓存
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 构建产物
+build/
+dist/
+*.egg-info/
