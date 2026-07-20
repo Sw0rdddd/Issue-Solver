@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 
 ARTIFACT_KIND_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+RUN_LOGS_DIRECTORY_NAME = "logs"
 
 
 def _json_payload(payload: Any) -> Any:
@@ -19,10 +20,16 @@ def _json_payload(payload: Any) -> Any:
     return payload
 
 
-def _artifact_directory(run_dir: str | Path) -> Path:
-    directory = Path(run_dir)
+def ensure_run_logs_directory(run_dir: str | Path) -> Path:
+    """返回并创建本次运行统一存放详细记录的 logs 目录。"""
+
+    directory = Path(run_dir) / RUN_LOGS_DIRECTORY_NAME
     directory.mkdir(parents=True, exist_ok=True)
     return directory
+
+
+def _artifact_directory(run_dir: str | Path) -> Path:
+    return ensure_run_logs_directory(run_dir)
 
 
 def _write_json_exclusive(path: Path, value: dict[str, Any]) -> None:

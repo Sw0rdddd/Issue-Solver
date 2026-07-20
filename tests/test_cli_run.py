@@ -258,7 +258,9 @@ def test_environment_failure_stops_before_model_even_when_quiet(
     assert "0" in captured.out
     model_constructor.assert_not_called()
     failure = (
-        configured_run_dir(tmp_path, repo_root) / "failure_environment.json"
+        configured_run_dir(tmp_path, repo_root)
+        / "logs"
+        / "failure_environment.json"
     )
     assert failure.is_file()
     report_path = configured_run_dir(tmp_path, repo_root) / "report.md"
@@ -695,7 +697,9 @@ def test_review_failure_interactively_rolls_back_and_records_decision(
 
     assert result["changed_files"] == []
     decision = json.loads(
-        (run_dir / "rollback_decision_r02.json").read_text(encoding="utf-8")
+        (run_dir / "logs" / "rollback_decision_r02.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert decision["payload"]["decision"] == "ROLLBACK"
     assert decision["payload"]["rollback_success"] is True
@@ -724,6 +728,8 @@ def test_review_failure_noninteractive_keeps_workspace(
     assert result["changed_files"] == ["app.py"]
     rollback.assert_not_called()
     decision = json.loads(
-        (run_dir / "rollback_decision_r01.json").read_text(encoding="utf-8")
+        (run_dir / "logs" / "rollback_decision_r01.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert decision["payload"]["decision"] == "KEEP_NON_INTERACTIVE"

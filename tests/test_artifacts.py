@@ -20,6 +20,7 @@ def test_write_run_artifact_has_no_round_coordinates(tmp_path: Path) -> None:
     )
 
     assert path.name == "environment_result.json"
+    assert path.parent == tmp_path / "logs"
     assert json.loads(path.read_text(encoding="utf-8")) == {
         "stage": "INITIALIZE",
         "payload": {"kind": "VENV"},
@@ -48,6 +49,7 @@ def test_write_stage_artifact_records_rsi_and_payload(tmp_path: Path) -> None:
     )
 
     assert path.name == "explore_r01_s02_i03.json"
+    assert path.parent == tmp_path / "logs"
     assert json.loads(path.read_text(encoding="utf-8")) == {
         "stage": "EXPLORE",
         "repair_round": 1,
@@ -67,6 +69,7 @@ def test_write_round_artifact_uses_only_repair_round(tmp_path: Path) -> None:
     )
 
     assert path.name == "review_result_r02.json"
+    assert path.parent == tmp_path / "logs"
     assert json.loads(path.read_text(encoding="utf-8")) == {
         "stage": "REVIEW",
         "repair_round": 2,

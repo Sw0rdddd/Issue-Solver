@@ -121,8 +121,8 @@ def test_coding_node_saves_task_and_final_result_with_rsi(
     assert result["changed_files"] == ["tracked.txt"]
     assert result["coding_iteration"] == 1
     assert git_output(git_repo, "status", "--porcelain") == "M tracked.txt"
-    task_path = run_dir / "coding_task_r01_s02_i00.json"
-    result_path = run_dir / "coding_result_r01_s02_i01.json"
+    task_path = run_dir / "logs" / "coding_task_r01_s02_i00.json"
+    result_path = run_dir / "logs" / "coding_result_r01_s02_i01.json"
     assert json.loads(task_path.read_text(encoding="utf-8"))["payload"] == (
         make_task().model_dump()
     )
@@ -164,7 +164,7 @@ def test_coding_node_program_generates_error_and_rolls_back(
     assert result["coding_iteration"] == 2
     assert "Coding Agent 报告任务未完成" in result["error"]
     assert git_output(git_repo, "status", "--porcelain") == ""
-    failure_path = run_dir / "failure_coding_r01_s02_i02.json"
+    failure_path = run_dir / "logs" / "failure_coding_r01_s02_i02.json"
     failure = json.loads(failure_path.read_text(encoding="utf-8"))
     assert failure["payload"]["reason"] == result["error"]
     assert failure["payload"]["agent_report"] == {
@@ -172,7 +172,7 @@ def test_coding_node_program_generates_error_and_rolls_back(
         "remaining_risks": ["仍需修改其他文件"],
     }
     assert failure["payload"]["rollback_success"] is True
-    assert not list(run_dir.glob("coding_result_*.json"))
+    assert not list((run_dir / "logs").glob("coding_result_*.json"))
 
 
 def test_coding_node_rejects_agent_changed_files_and_rolls_back(
@@ -227,8 +227,54 @@ def test_coding_node_preserves_task_when_agent_raises(
 
     assert result["status"] == "FAILED"
     assert "模型不可用" in result["error"]
-    assert (run_dir / "coding_task_r01_s02_i00.json").is_file()
-    assert (run_dir / "failure_coding_r01_s02_i00.json").is_file()
+    assert (
+        run_dir / "logs" / "coding_task_r01_s02_i00.json"
+    ).is_file()
+    assert (
+        run_dir / "logs" / "failure_coding_r01_s02_i00.json"
+    ).is_file()
+
+
+def test_coding_node_stops_after_tenth_failed_patch(
+    monkeypatch,
+    git_repo: Path,
+) -> None:
+    run_dir = git_repo.parent / "coding-patch-limit-run"
+
+    def fake_build_agent(model, context):
+        return PatchAgent(
+            context,
+            CodingResult(
+                success=False,
+                changed_files=[],
+                summary="未能生成有效 Patch",
+                diff_path=None,
+                validation=[],
+                remaining_risks=["Patch 格式无效"],
+            ),
+            [f"invalid patch {index}" for index in range(10)],
+        )
+
+    monkeypatch.setattr(coding, "build_coding_agent", fake_build_agent)
+
+    result = coding.build_coding_node(object())(
+        make_state(git_repo, run_dir)
+    )
+
+    assert result["status"] == "FAILED"
+    assert result["coding_iteration"] == 10
+    assert "最多 10 次 Patch 尝试" in result["error"]
+    assert git_output(git_repo, "status", "--porcelain") == ""
+    audit_path = run_dir / "logs" / "coding_audit_r01_s02.jsonl"
+    entries = [
+        json.loads(line)
+        for line in audit_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(entries) == 10
+    assert entries[-1]["patch"] == "invalid patch 9"
+    assert (
+        run_dir / "logs" / "failure_coding_r01_s02_i10.json"
+    ).is_file()
 
 
 @pytest.mark.parametrize(

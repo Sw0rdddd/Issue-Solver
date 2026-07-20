@@ -7,6 +7,7 @@ from pathlib import Path
 
 from schemas.environment_info import EnvironmentInfo
 from schemas.test_result import TestResult
+from services.artifacts import ensure_run_logs_directory
 from services.python_environment import build_environment_variables
 
 
@@ -153,8 +154,7 @@ def execute_test_command(
     repo_root = Path(repo_path).resolve()
     if not repo_root.is_dir():
         raise ValueError(f"测试仓库不存在或不是目录：{repo_root}")
-    output_dir = Path(run_dir).resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = ensure_run_logs_directory(Path(run_dir).resolve())
     stdout_path = output_dir / f"test_stdout_r{repair_round:02d}_i{index:02d}.log"
     stderr_path = output_dir / f"test_stderr_r{repair_round:02d}_i{index:02d}.log"
 

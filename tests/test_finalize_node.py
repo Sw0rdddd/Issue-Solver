@@ -88,7 +88,9 @@ def test_finalize_saves_patch_only_after_review_and_tests_pass(
     assert result["diff_path"] == str(run_dir / "diff.patch")
     assert (run_dir / "diff.patch").is_file()
     artifact = json.loads(
-        (run_dir / "finalize_result_r01.json").read_text(encoding="utf-8")
+        (run_dir / "logs" / "finalize_result_r01.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert artifact["payload"]["status"] == "FINISHED"
 
@@ -111,6 +113,8 @@ def test_finalize_rolls_back_when_limit_requires_it(git_repo: Path) -> None:
     assert result["changed_files"] == []
     assert git_output(git_repo, "status", "--porcelain") == ""
     artifact = json.loads(
-        (run_dir / "finalize_result_r01.json").read_text(encoding="utf-8")
+        (run_dir / "logs" / "finalize_result_r01.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert artifact["payload"]["rollback_success"] is True

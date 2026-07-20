@@ -122,7 +122,9 @@ def test_parse_issue_node_saves_normalized_issue(
     assert isinstance(structured_model.messages[1], HumanMessage)
     assert "查询失败" in structured_model.messages[1].content
 
-    saved = json.loads((tmp_path / "issue.json").read_text(encoding="utf-8"))
+    saved = json.loads(
+        (tmp_path / "logs" / "issue.json").read_text(encoding="utf-8")
+    )
     assert saved == issue.model_dump()
 
 

@@ -136,6 +136,7 @@ def test_apply_patch_modifies_real_file_and_inspects_diff(
     inspected = tools["inspect_changes"].invoke({})
 
     assert result["success"] is True
+    assert "下一步请调用 inspect_changes" in result["summary"]
     assert (git_repo / "tracked.txt").read_text(encoding="utf-8") == "changed\n"
     assert inspected["success"] is True
     assert inspected["data"]["changed_files"] == ["tracked.txt"]
@@ -374,7 +375,7 @@ def test_rollback_restores_base_and_records_reason(git_repo: Path) -> None:
 
     failure = json.loads(
         (
-            context.run_dir / "failure_coding_r01_s01_i02.json"
+            context.run_dir / "logs" / "failure_coding_r01_s01_i02.json"
         ).read_text(encoding="utf-8")
     )["payload"]
     assert result["success"] is True
@@ -448,13 +449,13 @@ def test_rollback_removes_untracked_symlink_without_touching_target(
     assert outside.read_text(encoding="utf-8") == "outside\n"
 
 
-def test_audit_log_tracks_hashes_without_patch_content(git_repo: Path) -> None:
+def test_audit_log_tracks_patch_content_and_hashes(git_repo: Path) -> None:
     context = make_context(git_repo, repair_round=2, stage_call=3)
     patch = modify_patch()
 
     tools_by_name(context)["apply_patch"].invoke({"patch": patch})
 
-    audit = (context.run_dir / "coding_audit_r02_s03.jsonl").read_text(
+    audit = (context.run_dir / "logs" / "coding_audit_r02_s03.jsonl").read_text(
         encoding="utf-8"
     )
     entry = json.loads(audit.strip())
@@ -462,9 +463,139 @@ def test_audit_log_tracks_hashes_without_patch_content(git_repo: Path) -> None:
     assert entry["stage_call"] == 3
     assert entry["index"] == 1
     assert entry["success"] is True
+    assert entry["patch"] == patch
+    assert entry["effective_patch"] == patch
+    assert entry["normalizations"] == []
     assert entry["input_sha256"]
+    assert entry["effective_patch_sha256"] == entry["input_sha256"]
     assert entry["cumulative_diff_sha256"]
-    assert patch not in audit
+
+
+@pytest.mark.parametrize("patch", ["%2Bbroken", "＋broken"])
+def test_invalid_patch_is_preserved_verbatim_in_audit(
+    git_repo: Path,
+    patch: str,
+) -> None:
+    context = make_context(git_repo)
+
+    result = tools_by_name(context)["apply_patch"].invoke({"patch": patch})
+
+    assert result["success"] is False
+    entry = json.loads(
+        (context.run_dir / "logs" / "coding_audit_r01_s01.jsonl").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert entry["patch"] == patch
+    assert entry["effective_patch"] == patch + "\n"
+    assert entry["normalizations"] == ["added_trailing_newline"]
+    assert entry["success"] is False
+
+
+def test_patch_safely_normalizes_hunk_counts_and_trailing_newline(
+    git_repo: Path,
+) -> None:
+    context = make_context(git_repo)
+    patch = modify_patch().replace(
+        "@@ -1 +1 @@",
+        "@@ -1,99 +1,99 @@",
+    ).removesuffix("\n")
+
+    result = tools_by_name(context)["apply_patch"].invoke({"patch": patch})
+
+    assert result["success"] is True
+    assert (git_repo / "tracked.txt").read_text(encoding="utf-8") == (
+        "changed\n"
+    )
+    entry = json.loads(
+        (context.run_dir / "logs" / "coding_audit_r01_s01.jsonl").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert entry["patch"] == patch
+    assert entry["effective_patch"].endswith("\n")
+    assert "@@ -1 +1 @@" in entry["effective_patch"]
+    assert entry["normalizations"] == [
+        "recounted_hunks",
+        "added_trailing_newline",
+    ]
+
+
+def test_patch_safely_removes_complete_markdown_fence(
+    git_repo: Path,
+) -> None:
+    context = make_context(git_repo)
+    patch = f"```diff\n{modify_patch()}```"
+
+    result = tools_by_name(context)["apply_patch"].invoke({"patch": patch})
+
+    assert result["success"] is True
+    entry = json.loads(
+        (context.run_dir / "logs" / "coding_audit_r01_s01.jsonl").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert entry["patch"] == patch
+    assert entry["effective_patch"] == modify_patch()
+    assert entry["normalizations"] == [
+        "removed_markdown_fence",
+        "added_trailing_newline",
+    ]
+
+
+def test_tenth_failed_patch_is_audited_then_stops(git_repo: Path) -> None:
+    context = make_context(git_repo)
+    apply_patch = tools_by_name(context)["apply_patch"]
+
+    for _ in range(9):
+        result = apply_patch.invoke({"patch": "invalid patch"})
+        assert result["success"] is False
+
+    with pytest.raises(RuntimeError, match="最多 10 次 Patch 尝试"):
+        apply_patch.invoke({"patch": "tenth invalid patch"})
+
+    entries = [
+        json.loads(line)
+        for line in (
+            context.run_dir / "logs" / "coding_audit_r01_s01.jsonl"
+        ).read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(entries) == 10
+    assert entries[-1]["index"] == 10
+    assert entries[-1]["patch"] == "tenth invalid patch"
+    assert entries[-1]["success"] is False
+
+
+def test_patch_after_tenth_success_is_audited_but_not_applied(
+    git_repo: Path,
+) -> None:
+    context = make_context(git_repo)
+    apply_patch = tools_by_name(context)["apply_patch"]
+
+    for index in range(9):
+        result = apply_patch.invoke({"patch": f"invalid patch {index}"})
+        assert result["success"] is False
+
+    result = apply_patch.invoke({"patch": modify_patch()})
+    assert result["success"] is True
+
+    rejected_patch = modify_patch(old="changed", new="forbidden")
+    with pytest.raises(RuntimeError, match="拒绝继续应用"):
+        apply_patch.invoke({"patch": rejected_patch})
+
+    assert (git_repo / "tracked.txt").read_text(encoding="utf-8") == (
+        "changed\n"
+    )
+    entries = [
+        json.loads(line)
+        for line in (
+            context.run_dir / "logs" / "coding_audit_r01_s01.jsonl"
+        ).read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(entries) == 11
+    assert entries[-1]["patch"] == rejected_patch
+    assert entries[-1]["success"] is False
+    assert "拒绝继续应用" in entries[-1]["error"]
 
 
 def test_failed_patch_also_increments_iteration(git_repo: Path) -> None:
@@ -478,7 +609,7 @@ def test_failed_patch_also_increments_iteration(git_repo: Path) -> None:
     entries = [
         json.loads(line)
         for line in (
-            context.run_dir / "coding_audit_r01_s01.jsonl"
+            context.run_dir / "logs" / "coding_audit_r01_s01.jsonl"
         ).read_text(encoding="utf-8").splitlines()
     ]
     assert [entry["index"] for entry in entries] == [1, 2]

@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -9,6 +7,7 @@ from prompts.issue_parser import (
     build_issue_parser_input,
 )
 from schemas.issue_specification import IssueSpec
+from services.artifacts import ensure_run_logs_directory
 from services.issue_loader import load_issue
 from services.structured_output import with_structured_output_retry
 
@@ -45,7 +44,9 @@ def build_parse_issue_node(model: BaseChatModel):
                 ])
 
             # 4. 保存规范化后的 Issue
-            issue_path = Path(state["run_dir"]) / "issue.json"
+            issue_path = (
+                ensure_run_logs_directory(state["run_dir"]) / "issue.json"
+            )
 
             issue_path.write_text(issue.model_dump_json(indent=2),encoding="utf-8")
 

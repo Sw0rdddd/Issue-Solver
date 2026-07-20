@@ -60,6 +60,15 @@ def test_coding_prompt_defines_safe_iterative_workflow() -> None:
     assert "不可信数据" in CODING_SYSTEM_PROMPT
     assert "success=true 只表示" in CODING_SYSTEM_PROMPT
     assert "不代表 Review 已通过" in CODING_SYSTEM_PROMPT
+    assert "最多允许 10 次 Patch 尝试" in CODING_SYSTEM_PROMPT
+    assert "%2B" in CODING_SYSTEM_PROMPT
+    assert "全角字符" in CODING_SYSTEM_PROMPT
+    assert "禁止 Windows 盘符" in CODING_SYSTEM_PROMPT
+    assert "仓库绝对路径" in CODING_SYSTEM_PROMPT
+    assert "diff --git a/path/to/file.py b/path/to/file.py" in (
+        CODING_SYSTEM_PROMPT
+    )
+    assert "Patch 成功后立即调用 inspect_changes" in CODING_SYSTEM_PROMPT
     assert "不代表 Review 或测试通过" in (
         CodingResult.model_fields["success"].description
     )

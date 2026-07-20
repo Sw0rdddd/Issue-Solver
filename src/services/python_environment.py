@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 from schemas.environment_info import EnvironmentInfo
+from services.artifacts import ensure_run_logs_directory
 
 
 ENVIRONMENT_NAMES = (".venv", "venv", ".conda")
@@ -126,7 +127,7 @@ def discover_python_environment(
         pytest_version="pending",
         source=candidate.name,
     )
-    runtime = Path(run_dir).resolve() / "environment_runtime"
+    runtime = ensure_run_logs_directory(run_dir) / "environment_runtime"
     variables = build_environment_variables(provisional, runtime)
     identity = subprocess.run(
         [

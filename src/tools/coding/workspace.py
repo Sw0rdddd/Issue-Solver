@@ -11,6 +11,7 @@ from typing import Any
 
 from langchain.tools import tool
 
+from services.artifacts import ensure_run_logs_directory
 from tools.coding.models import (
     DEFAULT_PROTECTED_NAMES,
     CodingToolContext,
@@ -21,9 +22,14 @@ from tools.coding.models import (
 
 
 MAX_PATCH_CHARS = 100_000
+MAX_CODING_PATCH_ATTEMPTS = 10
 MAX_CHANGED_FILES = 20
 MAX_FILE_BYTES = 1_048_576
 MAX_DIFF_PREVIEW_CHARS = 20_000
+PATCH_FENCE_MARKERS = frozenset({"```", "```diff", "```patch"})
+HUNK_HEADER_PATTERN = re.compile(
+    r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$"
+)
 
 
 @dataclass(frozen=True)
@@ -204,6 +210,89 @@ def _validate_patch_headers(patch: str) -> None:
             raise ValueError("新文件必须是普通 UTF-8 文本文件。")
         if header == "deleted file mode" and mode not in {"100644", "100755"}:
             raise ValueError("只能删除普通文本文件。")
+
+
+def _format_hunk_range(start: str, count: int) -> str:
+    return start if count == 1 else f"{start},{count}"
+
+
+def _recount_patch_hunks(patch: str) -> tuple[str, bool]:
+    lines = patch.split("\n")
+    recounted = False
+    index = 0
+
+    while index < len(lines):
+        match = HUNK_HEADER_PATTERN.fullmatch(lines[index])
+        if match is None:
+            index += 1
+            continue
+
+        old_count = 0
+        new_count = 0
+        body_index = index + 1
+        while body_index < len(lines):
+            line = lines[body_index]
+            if HUNK_HEADER_PATTERN.fullmatch(line) or line.startswith(
+                "diff --git "
+            ):
+                break
+            if not line and body_index == len(lines) - 1:
+                break
+            if line.startswith(" "):
+                old_count += 1
+                new_count += 1
+            elif line.startswith("-"):
+                old_count += 1
+            elif line.startswith("+"):
+                new_count += 1
+            elif line == r"\ No newline at end of file":
+                pass
+            else:
+                raise ValueError(
+                    f"Patch hunk 第 {body_index + 1} 行缺少合法的 ASCII Diff 前缀。"
+                )
+            body_index += 1
+
+        if body_index == index + 1:
+            raise ValueError(f"Patch hunk 第 {index + 1} 行没有修改内容。")
+
+        old_range = _format_hunk_range(match.group(1), old_count)
+        new_range = _format_hunk_range(match.group(3), new_count)
+        header = f"@@ -{old_range} +{new_range} @@{match.group(5)}"
+        if header != lines[index]:
+            lines[index] = header
+            recounted = True
+        index = body_index
+
+    return "\n".join(lines), recounted
+
+
+def _normalize_patch_for_git(patch: str) -> tuple[str, list[str]]:
+    normalized = patch
+    changes: list[str] = []
+
+    if "\r" in normalized:
+        normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
+        changes.append("normalized_line_endings")
+
+    lines = normalized.splitlines()
+    if (
+        len(lines) >= 3
+        and lines[0].strip().lower() in PATCH_FENCE_MARKERS
+        and lines[-1].strip() == "```"
+    ):
+        normalized = "\n".join(lines[1:-1])
+        changes.append("removed_markdown_fence")
+
+    normalized, recounted = _recount_patch_hunks(normalized)
+    if recounted:
+        changes.append("recounted_hunks")
+
+    if not normalized.endswith("\n"):
+        normalized += "\n"
+        changes.append("added_trailing_newline")
+
+    return normalized, changes
 
 
 def _validate_existing_file(path: Path, relative: str) -> None:
@@ -432,7 +521,7 @@ def _check_patch_applies(
 
 
 def _coding_audit_path(context: CodingToolContext) -> Path:
-    return context.run_dir / (
+    return ensure_run_logs_directory(context.run_dir) / (
         f"coding_audit_r{context.repair_round:02d}_"
         f"s{context.stage_call:02d}.jsonl"
     )
@@ -469,13 +558,45 @@ def _apply_patch(
     patch: str,
 ) -> CodingToolResult:
     input_sha256 = hashlib.sha256(patch.encode("utf-8")).hexdigest()
+    effective_patch: str | None = None
+    effective_patch_sha256: str | None = None
+    normalizations: list[str] = []
+    attempt_number = get_coding_iteration_count(context) + 1
+    if attempt_number > MAX_CODING_PATCH_ATTEMPTS:
+        error = (
+            f"已达到最多 {MAX_CODING_PATCH_ATTEMPTS} 次 Patch 尝试，"
+            "拒绝继续应用。"
+        )
+        try:
+            _append_audit(
+                context,
+                {
+                    "success": False,
+                    "touched_files": [],
+                    "changed_files": [],
+                    "patch": patch,
+                    "effective_patch": None,
+                    "normalizations": [],
+                    "input_sha256": input_sha256,
+                    "effective_patch_sha256": None,
+                    "cumulative_diff_sha256": None,
+                    "error": error,
+                },
+            )
+        except Exception as audit_exc:
+            error = f"{error}；记录 Coding 审计失败：{audit_exc}"
+        raise RuntimeError(error)
+
     path_states: list[_PathState] = []
     applied = False
     touched_files: list[str] = []
 
     try:
         _validate_patch_headers(patch)
-        patch_bytes = patch.encode("utf-8")
+        effective_patch, normalizations = _normalize_patch_for_git(patch)
+        _validate_patch_headers(effective_patch)
+        patch_bytes = effective_patch.encode("utf-8")
+        effective_patch_sha256 = hashlib.sha256(patch_bytes).hexdigest()
         touched_files = _extract_patch_paths(context, patch_bytes)
         path_states = _capture_path_states(context, touched_files)
         _reject_ignored_new_paths(context, path_states)
@@ -505,13 +626,20 @@ def _apply_patch(
                 "success": True,
                 "touched_files": touched_files,
                 "changed_files": snapshot.changed_files,
+                "patch": patch,
+                "effective_patch": effective_patch,
+                "normalizations": normalizations,
                 "input_sha256": input_sha256,
+                "effective_patch_sha256": effective_patch_sha256,
                 "cumulative_diff_sha256": cumulative_hash,
                 "error": None,
             },
         )
         return tool_success(
-            f"Patch 已应用，累计修改 {len(snapshot.changed_files)} 个文件。",
+            (
+                f"Patch 已应用，累计修改 {len(snapshot.changed_files)} 个文件。"
+                "下一步请调用 inspect_changes；只有检查发现仍需修改时才能生成新 Patch。"
+            ),
             {
                 "touched_files": touched_files,
                 "changed_files": snapshot.changed_files,
@@ -536,13 +664,21 @@ def _apply_patch(
                     "success": False,
                     "touched_files": touched_files,
                     "changed_files": [],
+                    "patch": patch,
+                    "effective_patch": effective_patch,
+                    "normalizations": normalizations,
                     "input_sha256": input_sha256,
+                    "effective_patch_sha256": effective_patch_sha256,
                     "cumulative_diff_sha256": None,
                     "error": error,
                 },
             )
         except Exception as audit_exc:
             error = f"{error}；记录 Coding 审计失败：{audit_exc}"
+        if attempt_number >= MAX_CODING_PATCH_ATTEMPTS:
+            raise RuntimeError(
+                f"{error}；已达到最多 {MAX_CODING_PATCH_ATTEMPTS} 次 Patch 尝试。"
+            )
         return tool_failure(error)
 
 
@@ -583,7 +719,7 @@ def build_coding_tools(context: CodingToolContext) -> list[Any]:
 
     @tool("apply_patch")
     def apply_patch_tool(patch: str) -> dict:
-        """应用一个 unified diff Patch 到当前目标仓库工作区。"""
+        """应用 unified diff Patch；最多尝试 10 次，且必须使用 ASCII Diff 标记。"""
 
         return _apply_patch(context, patch)
 
@@ -720,7 +856,7 @@ def rollback_to_base(
     """记录失败原因并受控恢复到本次运行的 base commit。"""
 
     iteration = get_coding_iteration_count(context)
-    failure_path = context.run_dir / (
+    failure_path = ensure_run_logs_directory(context.run_dir) / (
         f"failure_coding_r{context.repair_round:02d}_"
         f"s{context.stage_call:02d}_i{iteration:02d}.json"
     )

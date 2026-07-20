@@ -72,7 +72,9 @@ def test_review_node_saves_round_result_and_enters_test(
     assert result["phase"] == "TEST"
     assert result["review_result"] == review_result
     artifact = json.loads(
-        (tmp_path / "review_result_r02.json").read_text(encoding="utf-8")
+        (tmp_path / "logs" / "review_result_r02.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert artifact["payload"] == review_result.model_dump()
     assert "abc123" in agent.calls[0]["messages"][0]["content"]
@@ -96,6 +98,8 @@ def test_review_node_failure_logs_and_requests_rollback(
     assert result["rollback_prompt_required"] is True
     assert result["rollback_reason"] == result["error"]
     failure = json.loads(
-        (tmp_path / "failure_review_r02.json").read_text(encoding="utf-8")
+        (tmp_path / "logs" / "failure_review_r02.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert failure["payload"]["reason"] == result["error"]

@@ -126,6 +126,8 @@ def test_execute_test_command_records_complete_logs(
     assert result.cwd == str(repo.resolve())
     assert Path(result.stdout_path).is_file()
     assert Path(result.stderr_path).is_file()
+    assert Path(result.stdout_path).parent == run_dir / "logs"
+    assert Path(result.stderr_path).parent == run_dir / "logs"
     complete_stdout = Path(result.stdout_path).read_text(encoding="utf-8")
     assert complete_stdout
     assert expected_status.lower().removesuffix("ed") in complete_stdout.lower()

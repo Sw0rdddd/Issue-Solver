@@ -42,15 +42,14 @@ def test_discovers_repo_venv_and_validates_pytest(git_repo: Path) -> None:
     commit_ignore(git_repo, ".venv")
     create_venv(git_repo / ".venv", system_packages=True)
 
-    result = discover_python_environment(
-        git_repo,
-        git_repo.parent / "run",
-    )
+    run_dir = git_repo.parent / "run"
+    result = discover_python_environment(git_repo, run_dir)
 
     assert result.kind == "VENV"
     assert result.source == ".venv"
     assert Path(result.root_path) == (git_repo / ".venv").resolve()
     assert result.pytest_version.startswith("pytest")
+    assert (run_dir / "logs" / "environment_runtime" / "tmp").is_dir()
 
 
 def test_missing_repo_environment_does_not_fallback_to_active_python(

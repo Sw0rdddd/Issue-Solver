@@ -82,7 +82,7 @@ def test_explore_node_uses_custom_focus_and_saves_next_report(
     assert focus in message["content"]
     assert "Issue 已完成规范化" in message["content"]
 
-    report_path = tmp_path / "explore_r02_s03_i02.json"
+    report_path = tmp_path / "logs" / "explore_r02_s03_i02.json"
     saved = json.loads(report_path.read_text(encoding="utf-8"))
     assert saved == {
         "stage": "EXPLORE",
@@ -114,7 +114,7 @@ def test_explore_node_uses_default_focus_when_not_provided(
     content = agent.calls[0]["messages"][0]["content"]
     assert "定位与 Issue 相关的代码、潜在根因和测试位置" in content
     assert "当前工作流摘要：\n暂无" in content
-    assert (tmp_path / "explore_r01_s01_i01.json").is_file()
+    assert (tmp_path / "logs" / "explore_r01_s01_i01.json").is_file()
 
 
 def test_explore_node_rejects_missing_issue(tmp_path: Path) -> None:
@@ -157,7 +157,7 @@ def test_explore_node_rejects_invalid_structured_response(
             "仓库探索失败：Explore Agent 未返回有效的 ExploreReport。"
         ],
     }
-    assert not list(tmp_path.glob("explore_*.json"))
+    assert not list((tmp_path / "logs").glob("explore_*.json"))
 
 
 def test_explore_node_returns_agent_error(tmp_path: Path) -> None:
@@ -175,7 +175,7 @@ def test_explore_node_returns_agent_error(tmp_path: Path) -> None:
     assert result == {
         "explore_errors": ["仓库探索失败：模型调用失败"],
     }
-    assert not list(tmp_path.glob("explore_*.json"))
+    assert not list((tmp_path / "logs").glob("explore_*.json"))
 
 
 def test_explore_node_uses_send_coordinates(tmp_path: Path) -> None:
@@ -198,8 +198,10 @@ def test_explore_node_uses_send_coordinates(tmp_path: Path) -> None:
     )
 
     assert result == {"explore_reports": [report]}
-    assert (tmp_path / "explore_r02_s04_i03.json").is_file()
-    assert not (tmp_path / "explore_r02_s04_i01.json").exists()
+    assert (tmp_path / "logs" / "explore_r02_s04_i03.json").is_file()
+    assert not (
+        tmp_path / "logs" / "explore_r02_s04_i01.json"
+    ).exists()
 
 
 def test_send_branches_write_unique_report_files(tmp_path: Path) -> None:
@@ -247,7 +249,9 @@ def test_send_branches_write_unique_report_files(tmp_path: Path) -> None:
 
     assert len(agent.calls) == 3
     assert len(result["explore_reports"]) == 3
-    assert sorted(path.name for path in tmp_path.glob("explore_*.json")) == [
+    assert sorted(
+        path.name for path in (tmp_path / "logs").glob("explore_*.json")
+    ) == [
         "explore_r01_s01_i01.json",
         "explore_r01_s01_i02.json",
         "explore_r01_s01_i03.json",

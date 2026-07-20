@@ -97,7 +97,9 @@ def test_test_node_aggregates_round_results_and_stops_on_failure(
         "FAILED",
     ]
     artifact = json.loads(
-        (tmp_path / "run" / "test_result_r02.json").read_text(encoding="utf-8")
+        (tmp_path / "run" / "logs" / "test_result_r02.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert len(artifact["payload"]) == 2
 
