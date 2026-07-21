@@ -56,7 +56,8 @@ def test_initialize_node_rejects_dirty_worktree(
     )
 
     assert result["status"] == "FAILED"
-    assert "未提交修改" in result["error"]
+    assert "未提交修改" in result["failure"].message
+    assert result["failure"].type == "SAFETY"
 
 
 def test_initialize_node_rejects_unknown_project(
@@ -73,7 +74,8 @@ def test_initialize_node_rejects_unknown_project(
     )
 
     assert result["status"] == "FAILED"
-    assert "无法识别项目类型" in result["error"]
+    assert "无法识别项目类型" in result["failure"].message
+    assert result["failure"].type == "ENVIRONMENT"
 
 
 def test_initialize_node_returns_repository_error(
@@ -87,4 +89,6 @@ def test_initialize_node_returns_repository_error(
 
     result = initialize.initialize_node({"repo_path": str(tmp_path)})
 
-    assert result == {"status": "FAILED", "error": "不是 Git 仓库"}
+    assert result["status"] == "FAILED"
+    assert result["failure"].type == "ENVIRONMENT"
+    assert result["failure"].message == "不是 Git 仓库"

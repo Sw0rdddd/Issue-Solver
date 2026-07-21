@@ -4,6 +4,7 @@ from pathlib import Path
 from nodes import test as test_node_module
 from schemas.coding_task import CodingTask
 from schemas.environment_info import EnvironmentInfo
+from schemas.failure import make_failure
 from schemas.test_result import TestResult as ExecutionResult
 
 
@@ -22,13 +23,26 @@ def make_result(tmp_path: Path, status: str = "PASSED") -> ExecutionResult:
             0
             if status == "PASSED"
             else -1
-            if status in {"ENVIRONMENT_ERROR", "TIMEOUT"}
+            if status in {"ENVIRONMENT_ERROR", "TIMEOUT", "SAFETY_ERROR"}
             else 1
         ),
         duration=0.1,
         stdout_path=str(stdout),
         stderr_path=str(stderr),
         output_tail="[stdout] output",
+        failure=(
+            None
+            if status == "PASSED"
+            else make_failure(
+                {
+                    "FAILED": "SOLUTION",
+                    "ENVIRONMENT_ERROR": "ENVIRONMENT",
+                    "TIMEOUT": "LIMIT",
+                    "SAFETY_ERROR": "SAFETY",
+                }[status],
+                "测试失败",
+            )
+        ),
     )
 
 
@@ -176,18 +190,19 @@ def test_test_node_marks_worktree_mutation_for_rollback(
     def fake_append(result, message, tail_lines):
         return result.model_copy(
             update={
-                "status": "ENVIRONMENT_ERROR",
+                "status": "SAFETY_ERROR",
                 "exit_code": -1,
                 "output_tail": message,
+                "failure": make_failure("SAFETY", message),
             }
         )
 
-    monkeypatch.setattr(test_node_module, "append_environment_error", fake_append)
+    monkeypatch.setattr(test_node_module, "append_safety_error", fake_append)
 
     result = test_node_module.build_test_node()(make_state(tmp_path))
 
     assert result["rollback_required"] is True
-    assert result["latest_test_results"][-1].status == "ENVIRONMENT_ERROR"
+    assert result["latest_test_results"][-1].status == "SAFETY_ERROR"
 
 
 def test_test_node_stops_without_coordinator_on_environment_error(
@@ -209,5 +224,6 @@ def test_test_node_stops_without_coordinator_on_environment_error(
 
     assert result["status"] == "FAILED"
     assert result["phase"] == "TEST"
-    assert "修复目标仓库虚拟环境" in result["error"]
+    assert result["failure"].type == "ENVIRONMENT"
+    assert "修复目标仓库虚拟环境" in result["failure"].suggestion
     assert result.get("rollback_required") is None

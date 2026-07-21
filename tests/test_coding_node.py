@@ -8,6 +8,7 @@ from nodes import coding
 from schemas.coding_result import CodingResult
 from schemas.coding_task import CodingTask
 from schemas.explore_report import ExploreReport
+from schemas.failure import make_failure
 from schemas.issue_specification import IssueSpec
 from tools.coding import build_coding_tools
 
@@ -150,6 +151,10 @@ def test_coding_node_program_generates_error_and_rolls_back(
                 diff_path=None,
                 validation=["Patch 已应用"],
                 remaining_risks=["仍需修改其他文件"],
+                failure=make_failure(
+                    "SOLUTION",
+                    "Coding Agent 报告任务未完成。",
+                ),
             ),
             [PATCH, "invalid patch"],
         )
@@ -162,11 +167,11 @@ def test_coding_node_program_generates_error_and_rolls_back(
     assert result["status"] == "FAILED"
     assert result["phase"] == "CODE"
     assert result["coding_iteration"] == 2
-    assert "Coding Agent 报告任务未完成" in result["error"]
+    assert "Coding Agent 报告任务未完成" in result["failure"].message
     assert git_output(git_repo, "status", "--porcelain") == ""
     failure_path = run_dir / "logs" / "failure_coding_r01_s02_i02.json"
     failure = json.loads(failure_path.read_text(encoding="utf-8"))
-    assert failure["payload"]["reason"] == result["error"]
+    assert failure["payload"]["failure"] == result["failure"].model_dump()
     assert failure["payload"]["agent_report"] == {
         "summary": "模型认为仍未完成",
         "remaining_risks": ["仍需修改其他文件"],
@@ -201,7 +206,7 @@ def test_coding_node_rejects_agent_changed_files_and_rolls_back(
     )
 
     assert result["status"] == "FAILED"
-    assert "changed_files 与实际修改不一致" in result["error"]
+    assert "changed_files 与实际修改不一致" in result["failure"].message
     assert git_output(git_repo, "status", "--porcelain") == ""
 
 
@@ -226,7 +231,8 @@ def test_coding_node_preserves_task_when_agent_raises(
     )
 
     assert result["status"] == "FAILED"
-    assert "模型不可用" in result["error"]
+    assert "模型不可用" in result["failure"].message
+    assert result["failure"].type == "MODEL"
     assert (
         run_dir / "logs" / "coding_task_r01_s02_i00.json"
     ).is_file()
@@ -251,6 +257,7 @@ def test_coding_node_stops_after_tenth_failed_patch(
                 diff_path=None,
                 validation=[],
                 remaining_risks=["Patch 格式无效"],
+                failure=make_failure("SOLUTION", "未能生成有效 Patch。"),
             ),
             [f"invalid patch {index}" for index in range(10)],
         )
@@ -263,7 +270,8 @@ def test_coding_node_stops_after_tenth_failed_patch(
 
     assert result["status"] == "FAILED"
     assert result["coding_iteration"] == 10
-    assert "最多 10 次 Patch 尝试" in result["error"]
+    assert "最多 10 次 Patch 尝试" in result["failure"].message
+    assert result["failure"].type == "LIMIT"
     assert git_output(git_repo, "status", "--porcelain") == ""
     audit_path = run_dir / "logs" / "coding_audit_r01_s02.jsonl"
     entries = [
@@ -314,5 +322,5 @@ def test_coding_node_rejects_invalid_success_claims(
     )
 
     assert result["status"] == "FAILED"
-    assert error_text in result["error"]
+    assert error_text in result["failure"].message
     assert git_output(git_repo, "status", "--porcelain") == ""

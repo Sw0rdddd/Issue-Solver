@@ -31,6 +31,8 @@ CODING_SYSTEM_PROMPT = """
 14. 如果无法在允许范围内可靠完成任务，success 应为 false，并在 remaining_risks 中说明具体阻碍；不得扩大修改范围。
 15. Patch 成功后立即调用 inspect_changes。只有检查发现确实仍需修改时才能生成新 Patch；检查确认完成后立即返回 CodingResult，不要重复等价 Patch 或继续进行无意义操作。
 16. 当 list_files 或搜索工具提示结果被截断时，必须缩小 path、file_pattern 或 max_depth 后继续调查，不得把截断输出视为完整仓库证据。
+17. 工具失败会提供错误类型、原因和建议：INPUT 应修正调用参数，SOLUTION 应调整 Patch，SAFETY 不得绕过边界，ENVIRONMENT/LIMIT/INTERNAL 应停止无意义重试并如实报告。
+18. success=false 时必须返回 failure 对象；success=true 时 failure 必须为 null。failure.type 只能是 INPUT、ENVIRONMENT、MODEL、SOLUTION、SAFETY、LIMIT、INTERNAL。
 
 Patch 格式要求：
 - apply_patch.patch 参数必须直接传入合法的 unified diff，不要添加 Markdown 代码围栏。

@@ -3,6 +3,12 @@ from pathlib import Path
 
 from langchain.tools import tool
 
+from schemas.failure import FailureType, format_failure_for_agent, make_failure
+
+
+def _failure(failure_type: FailureType, message: str) -> str:
+    return format_failure_for_agent(make_failure(failure_type, message))
+
 
 @tool
 def git_diff(repo_path: str,base_commit: str = "HEAD",path: str = ".",max_chars: int = 20_000) -> str:
@@ -16,10 +22,10 @@ def git_diff(repo_path: str,base_commit: str = "HEAD",path: str = ".",max_chars:
     """
 
     if max_chars < 1:
-        return "错误：max_chars 必须大于 0。"
+        return _failure("INPUT", "max_chars 必须大于 0。")
 
     if max_chars > 100_000:
-        return "错误：max_chars 不能大于 100000。"
+        return _failure("INPUT", "max_chars 不能大于 100000。")
 
     repo_root = Path(repo_path).resolve()
     target = (repo_root / path).resolve()
@@ -27,10 +33,10 @@ def git_diff(repo_path: str,base_commit: str = "HEAD",path: str = ".",max_chars:
     try:
         relative_path = target.relative_to(repo_root)
     except ValueError:
-        return "错误：禁止访问仓库之外的路径。"
+        return _failure("SAFETY", "禁止访问仓库之外的路径。")
 
     if not repo_root.is_dir():
-        return f"错误：仓库路径不存在：{repo_path}"
+        return _failure("INPUT", f"仓库路径不存在：{repo_path}")
 
     command = [
         "git",
@@ -53,13 +59,13 @@ def git_diff(repo_path: str,base_commit: str = "HEAD",path: str = ".",max_chars:
             check=False,
         )
     except FileNotFoundError:
-        return "错误：未找到 Git，请先安装并配置 Git。"
+        return _failure("ENVIRONMENT", "未找到 Git，请先安装并配置 Git。")
     except subprocess.TimeoutExpired:
-        return "错误：git diff 执行超时。"
+        return _failure("LIMIT", "git diff 执行超时。")
 
     if result.returncode != 0:
         error = result.stderr.strip() or "未知 Git 错误"
-        return f"错误：git diff 执行失败：{error}"
+        return _failure("ENVIRONMENT", f"git diff 执行失败：{error}")
 
     diff = result.stdout
 
@@ -84,10 +90,10 @@ def git_log(repo_path: str,path: str = ".",limit: int = 10) -> str:
     """
 
     if limit < 1:
-        return "错误：limit 必须大于等于 1。"
+        return _failure("INPUT", "limit 必须大于等于 1。")
 
     if limit > 50:
-        return "错误：limit 不能大于 50。"
+        return _failure("INPUT", "limit 不能大于 50。")
 
     repo_root = Path(repo_path).resolve()
     target = (repo_root / path).resolve()
@@ -95,10 +101,10 @@ def git_log(repo_path: str,path: str = ".",limit: int = 10) -> str:
     try:
         relative_path = target.relative_to(repo_root)
     except ValueError:
-        return "错误：禁止访问仓库之外的路径。"
+        return _failure("SAFETY", "禁止访问仓库之外的路径。")
 
     if not repo_root.is_dir():
-        return f"错误：仓库路径不存在：{repo_path}"
+        return _failure("INPUT", f"仓库路径不存在：{repo_path}")
 
     command = [
         "git",
@@ -122,13 +128,13 @@ def git_log(repo_path: str,path: str = ".",limit: int = 10) -> str:
             check=False,
         )
     except FileNotFoundError:
-        return "错误：未找到 Git，请先安装并配置 Git。"
+        return _failure("ENVIRONMENT", "未找到 Git，请先安装并配置 Git。")
     except subprocess.TimeoutExpired:
-        return "错误：git log 执行超时。"
+        return _failure("LIMIT", "git log 执行超时。")
 
     if result.returncode != 0:
         error = result.stderr.strip() or "未知 Git 错误"
-        return f"错误：git log 执行失败：{error}"
+        return _failure("ENVIRONMENT", f"git log 执行失败：{error}")
 
     output = result.stdout.strip()
 
@@ -155,10 +161,10 @@ def git_show(
     """
 
     if max_chars < 1:
-        return "错误：max_chars 必须大于 0。"
+        return _failure("INPUT", "max_chars 必须大于 0。")
 
     if max_chars > 100_000:
-        return "错误：max_chars 不能大于 100000。"
+        return _failure("INPUT", "max_chars 不能大于 100000。")
 
     repo_root = Path(repo_path).resolve()
     target = (repo_root / path).resolve()
@@ -166,10 +172,10 @@ def git_show(
     try:
         relative_path = target.relative_to(repo_root)
     except ValueError:
-        return "错误：禁止访问仓库之外的路径。"
+        return _failure("SAFETY", "禁止访问仓库之外的路径。")
 
     if not repo_root.is_dir():
-        return f"错误：仓库路径不存在：{repo_path}"
+        return _failure("INPUT", f"仓库路径不存在：{repo_path}")
 
     command = [
         "git",
@@ -194,13 +200,13 @@ def git_show(
             check=False,
         )
     except FileNotFoundError:
-        return "错误：未找到 Git，请先安装并配置 Git。"
+        return _failure("ENVIRONMENT", "未找到 Git，请先安装并配置 Git。")
     except subprocess.TimeoutExpired:
-        return "错误：git show 执行超时。"
+        return _failure("LIMIT", "git show 执行超时。")
 
     if result.returncode != 0:
         error = result.stderr.strip() or "未知 Git 错误"
-        return f"错误：git show 执行失败：{error}"
+        return _failure("ENVIRONMENT", f"git show 执行失败：{error}")
 
     output = result.stdout
 

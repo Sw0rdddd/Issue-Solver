@@ -141,7 +141,8 @@ def test_parse_issue_node_returns_loader_error(
     result = node({"issue_input": "", "run_dir": str(tmp_path)})
 
     assert result["status"] == "FAILED"
-    assert result["error"] == "Issue 解析失败：Issue 输入不能为空"
+    assert result["failure"].type == "INPUT"
+    assert result["failure"].message == "Issue 加载失败：Issue 输入不能为空"
 
 
 def test_parse_issue_node_returns_model_error(
@@ -161,4 +162,5 @@ def test_parse_issue_node_returns_model_error(
     result = node({"issue_input": "正文", "run_dir": str(tmp_path)})
 
     assert result["status"] == "FAILED"
-    assert result["error"] == "Issue 解析失败：模型调用失败"
+    assert result["failure"].type == "MODEL"
+    assert result["failure"].message == "Issue 解析失败：模型调用失败"

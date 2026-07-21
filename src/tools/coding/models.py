@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, TypedDict
 
+from schemas.failure import ClassifiedFailure, FailureType, make_failure
+
 
 DEFAULT_PROTECTED_NAMES = frozenset(
     {
@@ -28,7 +30,7 @@ class CodingToolResult(TypedDict):
     success: bool
     summary: str
     data: dict[str, Any]
-    error: str | None
+    failure: dict[str, str] | None
     truncated: bool
 
 
@@ -42,17 +44,25 @@ def tool_success(
         "success": True,
         "summary": summary,
         "data": data or {},
-        "error": None,
+        "failure": None,
         "truncated": truncated,
     }
 
 
-def tool_failure(error: str) -> CodingToolResult:
+def tool_failure(
+    message: str,
+    failure_type: FailureType = "INTERNAL",
+    suggestion: str | None = None,
+) -> CodingToolResult:
     return {
         "success": False,
         "summary": "操作失败。",
         "data": {},
-        "error": error,
+        "failure": make_failure(
+            failure_type,
+            message,
+            suggestion,
+        ).model_dump(mode="json"),
         "truncated": False,
     }
 
@@ -91,13 +101,17 @@ def _run_git(repo_root: Path, *args: str) -> str:
             check=False,
         )
     except FileNotFoundError as exc:
-        raise ValueError("未找到 Git。") from exc
+        raise ClassifiedFailure(
+            make_failure("ENVIRONMENT", "未找到 Git。")
+        ) from exc
     except subprocess.TimeoutExpired as exc:
-        raise ValueError("Git 命令执行超时。") from exc
+        raise ClassifiedFailure(
+            make_failure("LIMIT", "Git 命令执行超时。")
+        ) from exc
 
     if result.returncode != 0:
         error = result.stderr.strip() or "未知 Git 错误"
-        raise ValueError(error)
+        raise ClassifiedFailure(make_failure("ENVIRONMENT", error))
     return result.stdout.strip()
 
 

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from schemas.failure import ClassifiedFailure, make_failure
 from tools.coding import (
     CodingToolContext,
     build_coding_tools,
@@ -191,7 +192,11 @@ def test_apply_patch_rejects_path_outside_allowed_scope(git_repo: Path) -> None:
     )
 
     assert result["success"] is False
-    assert "允许修改范围" in result["error"]
+    assert "允许修改范围" in result["failure"]["message"]
+    assert result["failure"]["type"] == "SAFETY"
+    assert json.loads(json.dumps(result, ensure_ascii=False))["failure"] == (
+        result["failure"]
+    )
     assert (git_repo / "tracked.txt").read_text(encoding="utf-8") == "initial\n"
 
 
@@ -202,7 +207,7 @@ def test_apply_patch_rejects_protected_path(git_repo: Path) -> None:
     result = tools_by_name(context)["apply_patch"].invoke({"patch": patch})
 
     assert result["success"] is False
-    assert "受保护路径" in result["error"]
+    assert "受保护路径" in result["failure"]["message"]
     assert not (git_repo / ".git" / "agent.txt").exists()
 
 
@@ -213,7 +218,7 @@ def test_apply_patch_rejects_conda_environment_path(git_repo: Path) -> None:
     )
 
     assert result["success"] is False
-    assert "受保护路径" in result["error"]
+    assert "受保护路径" in result["failure"]["message"]
 
 
 def test_apply_patch_failure_is_atomic(git_repo: Path) -> None:
@@ -256,7 +261,7 @@ def test_apply_patch_rejects_unsupported_patch_types(
     result = tools_by_name(context)["apply_patch"].invoke({"patch": patch})
 
     assert result["success"] is False
-    assert error_text in result["error"]
+    assert error_text in result["failure"]["message"]
 
 
 def test_apply_patch_rejects_symlink_target(git_repo: Path) -> None:
@@ -274,7 +279,10 @@ def test_apply_patch_rejects_symlink_target(git_repo: Path) -> None:
     )
 
     assert result["success"] is False
-    assert "符号链接" in result["error"] or "仓库之外" in result["error"]
+    assert (
+        "符号链接" in result["failure"]["message"]
+        or "仓库之外" in result["failure"]["message"]
+    )
     assert outside.read_text(encoding="utf-8") == "outside\n"
 
 
@@ -298,7 +306,7 @@ def test_apply_patch_rejects_new_ignored_file(git_repo: Path) -> None:
     )
 
     assert result["success"] is False
-    assert "Git 忽略" in result["error"]
+    assert "Git 忽略" in result["failure"]["message"]
     assert not (git_repo / "ignored.txt").exists()
 
 
@@ -310,7 +318,7 @@ def test_apply_patch_rejects_patch_over_size_limit(git_repo: Path) -> None:
     )
 
     assert result["success"] is False
-    assert "100000" in result["error"]
+    assert "100000" in result["failure"]["message"]
 
 
 def test_inspect_changes_truncates_large_diff(git_repo: Path) -> None:
@@ -371,7 +379,8 @@ def test_rollback_restores_base_and_records_reason(git_repo: Path) -> None:
     apply_patch_tool.invoke({"patch": modify_patch()})
     apply_patch_tool.invoke({"patch": add_patch()})
 
-    result = rollback_to_base(context, "达到最大循环次数")
+    primary_failure = make_failure("LIMIT", "达到最大循环次数")
+    result = rollback_to_base(context, primary_failure)
 
     failure = json.loads(
         (
@@ -379,7 +388,7 @@ def test_rollback_restores_base_and_records_reason(git_repo: Path) -> None:
         ).read_text(encoding="utf-8")
     )["payload"]
     assert result["success"] is True
-    assert failure["reason"] == "达到最大循环次数"
+    assert failure["failure"] == primary_failure.model_dump()
     assert failure["rollback_success"] is True
     assert (git_repo / "tracked.txt").read_text(encoding="utf-8") == "initial\n"
     assert not (git_repo / "src" / "new.py").exists()
@@ -396,7 +405,10 @@ def test_rollback_restores_deleted_or_renamed_file(
     context = make_context(git_repo)
     tools_by_name(context)["apply_patch"].invoke({"patch": patch})
 
-    result = rollback_to_base(context, "运行失败")
+    result = rollback_to_base(
+        context,
+        make_failure("INTERNAL", "运行失败"),
+    )
 
     assert result["success"] is True
     assert (git_repo / "tracked.txt").read_text(encoding="utf-8") == "initial\n"
@@ -422,7 +434,10 @@ def test_rollback_restores_changes_outside_agent_scope(git_repo: Path) -> None:
     outside_scope.write_text("changed by test\n", encoding="utf-8")
     (git_repo / "test-created.txt").write_text("temporary\n", encoding="utf-8")
 
-    result = rollback_to_base(context, "测试修改了工作区")
+    result = rollback_to_base(
+        context,
+        make_failure("SAFETY", "测试修改了工作区"),
+    )
 
     assert result["success"] is True
     assert outside_scope.read_text(encoding="utf-8") == "base\n"
@@ -442,7 +457,10 @@ def test_rollback_removes_untracked_symlink_without_touching_target(
     except OSError:
         pytest.skip("当前环境不允许创建符号链接")
 
-    result = rollback_to_base(context, "运行失败")
+    result = rollback_to_base(
+        context,
+        make_failure("INTERNAL", "运行失败"),
+    )
 
     assert result["success"] is True
     assert not link.exists()
@@ -551,8 +569,12 @@ def test_tenth_failed_patch_is_audited_then_stops(git_repo: Path) -> None:
         result = apply_patch.invoke({"patch": "invalid patch"})
         assert result["success"] is False
 
-    with pytest.raises(RuntimeError, match="最多 10 次 Patch 尝试"):
+    with pytest.raises(
+        ClassifiedFailure,
+        match="最多 10 次 Patch 尝试",
+    ) as exc_info:
         apply_patch.invoke({"patch": "tenth invalid patch"})
+    assert exc_info.value.failure.type == "LIMIT"
 
     entries = [
         json.loads(line)
@@ -580,8 +602,12 @@ def test_patch_after_tenth_success_is_audited_but_not_applied(
     assert result["success"] is True
 
     rejected_patch = modify_patch(old="changed", new="forbidden")
-    with pytest.raises(RuntimeError, match="拒绝继续应用"):
+    with pytest.raises(
+        ClassifiedFailure,
+        match="拒绝继续应用",
+    ) as exc_info:
         apply_patch.invoke({"patch": rejected_patch})
+    assert exc_info.value.failure.type == "LIMIT"
 
     assert (git_repo / "tracked.txt").read_text(encoding="utf-8") == (
         "changed\n"
@@ -595,7 +621,8 @@ def test_patch_after_tenth_success_is_audited_but_not_applied(
     assert len(entries) == 11
     assert entries[-1]["patch"] == rejected_patch
     assert entries[-1]["success"] is False
-    assert "拒绝继续应用" in entries[-1]["error"]
+    assert "拒绝继续应用" in entries[-1]["failure"]["message"]
+    assert entries[-1]["failure"]["type"] == "LIMIT"
 
 
 def test_failed_patch_also_increments_iteration(git_repo: Path) -> None:

@@ -4,6 +4,8 @@ from pathlib import Path
 
 from langchain.tools import tool
 
+from schemas.failure import FailureType, format_failure_for_agent, make_failure
+
 IGNORED_NAMES = {
     ".git",
     ".venv",
@@ -17,6 +19,10 @@ IGNORED_NAMES = {
     "dist",
     "build",
 }
+
+
+def _failure(failure_type: FailureType, message: str) -> str:
+    return format_failure_for_agent(make_failure(failure_type, message))
 
 
 @tool
@@ -36,16 +42,16 @@ def list_files(
     """
 
     if max_depth < 0:
-        return "错误：max_depth 不能小于 0。"
+        return _failure("INPUT", "max_depth 不能小于 0。")
 
     if max_depth > 5:
-        return "错误：max_depth 不能大于 5。"
+        return _failure("INPUT", "max_depth 不能大于 5。")
 
     if max_entries < 1:
-        return "错误：max_entries 必须大于等于 1。"
+        return _failure("INPUT", "max_entries 必须大于等于 1。")
 
     if max_entries > 2_000:
-        return "错误：max_entries 不能大于 2000。"
+        return _failure("INPUT", "max_entries 不能大于 2000。")
 
     repo_root = Path(repo_path).resolve()
     target = (repo_root / path).resolve()
@@ -54,15 +60,15 @@ def list_files(
     try:
         relative_target = target.relative_to(repo_root)
     except ValueError:
-        return "错误：禁止访问仓库之外的路径。"
+        return _failure("SAFETY", "禁止访问仓库之外的路径。")
     if any(part in IGNORED_NAMES for part in relative_target.parts):
-        return "错误：禁止访问依赖或缓存目录。"
+        return _failure("SAFETY", "禁止访问依赖或缓存目录。")
 
     if not target.exists():
-        return f"错误：路径不存在：{path}"
+        return _failure("INPUT", f"路径不存在：{path}")
 
     if not target.is_dir():
-        return f"错误：该路径不是目录：{path}"
+        return _failure("INPUT", f"该路径不是目录：{path}")
 
     results: list[str] = []
 
@@ -132,13 +138,13 @@ def read_file(repo_path: str, path: str, start_line: int = 1, end_line: int = 20
     """
 
     if start_line < 1:
-        return "错误：start_line 必须大于等于 1。"
+        return _failure("INPUT", "start_line 必须大于等于 1。")
 
     if end_line < start_line:
-        return "错误：end_line 不能小于 start_line。"
+        return _failure("INPUT", "end_line 不能小于 start_line。")
 
     if end_line - start_line + 1 > 500:
-        return "错误：单次最多读取 500 行。"
+        return _failure("INPUT", "单次最多读取 500 行。")
 
     repo_root = Path(repo_path).resolve()
     target = (repo_root / path).resolve()
@@ -147,15 +153,15 @@ def read_file(repo_path: str, path: str, start_line: int = 1, end_line: int = 20
     try:
         relative_target = target.relative_to(repo_root)
     except ValueError:
-        return "错误：禁止读取仓库之外的文件。"
+        return _failure("SAFETY", "禁止读取仓库之外的文件。")
     if any(part in IGNORED_NAMES for part in relative_target.parts):
-        return "错误：禁止读取依赖或缓存目录。"
+        return _failure("SAFETY", "禁止读取依赖或缓存目录。")
 
     if not target.exists():
-        return f"错误：文件不存在：{path}"
+        return _failure("INPUT", f"文件不存在：{path}")
 
     if not target.is_file():
-        return f"错误：该路径不是文件：{path}"
+        return _failure("INPUT", f"该路径不是文件：{path}")
 
     try:
         lines = target.read_text(
@@ -163,15 +169,15 @@ def read_file(repo_path: str, path: str, start_line: int = 1, end_line: int = 20
             errors="replace",
         ).splitlines()
     except OSError as exc:
-        return f"错误：读取文件失败：{exc}"
+        return _failure("ENVIRONMENT", f"读取文件失败：{exc}")
 
     if not lines:
         return f"文件为空：{path}"
 
     if start_line > len(lines):
-        return (
-            f"错误：start_line 超出文件范围，"
-            f"该文件共 {len(lines)} 行。"
+        return _failure(
+            "INPUT",
+            f"start_line 超出文件范围，该文件共 {len(lines)} 行。",
         )
 
     actual_end = min(end_line, len(lines))

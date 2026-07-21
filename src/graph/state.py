@@ -5,6 +5,7 @@ from schemas.coding_result import CodingResult
 from schemas.coding_task import CodingTask
 from schemas.environment_info import EnvironmentInfo
 from schemas.explore_report import ExploreReport
+from schemas.failure import FailureInfo
 from schemas.issue_specification import IssueSpec
 from schemas.review_result import ReviewResult
 from schemas.test_result import TestResult
@@ -78,7 +79,7 @@ class ResolverState(TypedDict):
     explore_reports: NotRequired[
         Annotated[list[ExploreReport], add]
     ]
-    explore_errors: NotRequired[Annotated[list[str], add]]
+    explore_failures: NotRequired[Annotated[list[FailureInfo], add]]
 
     # Coding 节点写入
     coding_result: NotRequired[CodingResult]
@@ -94,9 +95,8 @@ class ResolverState(TypedDict):
     latest_test_results: NotRequired[list[TestResult]]
 
     # 失败收尾策略
-    rollback_prompt_required: NotRequired[bool]
     rollback_required: NotRequired[bool]
-    rollback_reason: NotRequired[str]
+    rollback_failure: NotRequired[FailureInfo]
 
     # 节点执行失败时写入
-    error: NotRequired[str]
+    failure: NotRequired[FailureInfo]

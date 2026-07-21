@@ -11,6 +11,12 @@ from typing import Any
 
 from langchain.tools import tool
 
+from schemas.failure import (
+    ClassifiedFailure,
+    FailureInfo,
+    failure_from_exception,
+    make_failure,
+)
 from services.artifacts import ensure_run_logs_directory
 from tools.coding.models import (
     DEFAULT_PROTECTED_NAMES,
@@ -65,9 +71,13 @@ def _run_git_bytes(
             env=env,
         )
     except FileNotFoundError as exc:
-        raise RuntimeError("未找到 Git。") from exc
+        raise ClassifiedFailure(
+            make_failure("ENVIRONMENT", "未找到 Git。")
+        ) from exc
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("Git 命令执行超时。") from exc
+        raise ClassifiedFailure(
+            make_failure("LIMIT", "Git 命令执行超时。")
+        ) from exc
 
 
 def _git_error(result: subprocess.CompletedProcess[bytes]) -> str:
@@ -83,7 +93,9 @@ def _normalized_relative_path(value: str) -> str:
         or (len(normalized) >= 2 and normalized[0].isalpha() and normalized[1] == ":")
         or ".." in path.parts
     ):
-        raise ValueError(f"Patch 包含仓库外或无效路径：{value}")
+        raise ClassifiedFailure(
+            make_failure("SAFETY", f"Patch 包含仓库外或无效路径：{value}")
+        )
     return path.as_posix()
 
 
@@ -101,24 +113,32 @@ def _validate_scoped_path(context: CodingToolContext, value: str) -> str:
     if any(part in DEFAULT_PROTECTED_NAMES for part in parts) or any(
         _matches_scope(relative, scope) for scope in context.protected_paths
     ):
-        raise ValueError(f"Patch 触碰受保护路径：{relative}")
+        raise ClassifiedFailure(
+            make_failure("SAFETY", f"Patch 触碰受保护路径：{relative}")
+        )
 
     if not any(
         _matches_scope(relative, scope) for scope in context.allowed_paths
     ):
-        raise ValueError(f"Patch 路径超出允许修改范围：{relative}")
+        raise ClassifiedFailure(
+            make_failure("SAFETY", f"Patch 路径超出允许修改范围：{relative}")
+        )
 
     current = context.repo_root
     for part in parts:
         current = current / part
         if current.is_symlink():
-            raise ValueError(f"禁止修改符号链接或其后代：{relative}")
+            raise ClassifiedFailure(
+                make_failure("SAFETY", f"禁止修改符号链接或其后代：{relative}")
+            )
 
     target = (context.repo_root / Path(*parts)).resolve(strict=False)
     try:
         target.relative_to(context.repo_root)
     except ValueError as exc:
-        raise ValueError(f"Patch 路径解析到仓库之外：{relative}") from exc
+        raise ClassifiedFailure(
+            make_failure("SAFETY", f"Patch 路径解析到仓库之外：{relative}")
+        ) from exc
 
     return relative
 
@@ -563,9 +583,10 @@ def _apply_patch(
     normalizations: list[str] = []
     attempt_number = get_coding_iteration_count(context) + 1
     if attempt_number > MAX_CODING_PATCH_ATTEMPTS:
-        error = (
+        limit_failure = make_failure(
+            "LIMIT",
             f"已达到最多 {MAX_CODING_PATCH_ATTEMPTS} 次 Patch 尝试，"
-            "拒绝继续应用。"
+            "拒绝继续应用。",
         )
         try:
             _append_audit(
@@ -580,12 +601,15 @@ def _apply_patch(
                     "input_sha256": input_sha256,
                     "effective_patch_sha256": None,
                     "cumulative_diff_sha256": None,
-                    "error": error,
+                    "failure": limit_failure.model_dump(mode="json"),
                 },
             )
         except Exception as audit_exc:
-            error = f"{error}；记录 Coding 审计失败：{audit_exc}"
-        raise RuntimeError(error)
+            limit_failure = make_failure(
+                "INTERNAL",
+                f"{limit_failure.message}；记录 Coding 审计失败：{audit_exc}",
+            )
+        raise ClassifiedFailure(limit_failure)
 
     path_states: list[_PathState] = []
     applied = False
@@ -632,7 +656,7 @@ def _apply_patch(
                 "input_sha256": input_sha256,
                 "effective_patch_sha256": effective_patch_sha256,
                 "cumulative_diff_sha256": cumulative_hash,
-                "error": None,
+                "failure": None,
             },
         )
         return tool_success(
@@ -670,16 +694,29 @@ def _apply_patch(
                     "input_sha256": input_sha256,
                     "effective_patch_sha256": effective_patch_sha256,
                     "cumulative_diff_sha256": None,
-                    "error": error,
+                    "failure": failure_from_exception(
+                        exc,
+                        "SOLUTION",
+                    ).model_dump(mode="json"),
                 },
             )
         except Exception as audit_exc:
             error = f"{error}；记录 Coding 审计失败：{audit_exc}"
         if attempt_number >= MAX_CODING_PATCH_ATTEMPTS:
-            raise RuntimeError(
-                f"{error}；已达到最多 {MAX_CODING_PATCH_ATTEMPTS} 次 Patch 尝试。"
+            raise ClassifiedFailure(
+                make_failure(
+                    "LIMIT",
+                    f"{error}；已达到最多 {MAX_CODING_PATCH_ATTEMPTS} 次 Patch 尝试。",
+                )
             )
-        return tool_failure(error)
+        failure = failure_from_exception(exc, "SOLUTION")
+        return {
+            "success": False,
+            "summary": "操作失败。",
+            "data": {},
+            "failure": failure.model_dump(mode="json"),
+            "truncated": False,
+        }
 
 
 def _inspect_changes(context: CodingToolContext) -> CodingToolResult:
@@ -700,7 +737,14 @@ def _inspect_changes(context: CodingToolContext) -> CodingToolResult:
             truncated=truncated,
         )
     except Exception as exc:
-        return tool_failure(str(exc))
+        failure = failure_from_exception(exc, "SOLUTION")
+        return {
+            "success": False,
+            "summary": "操作失败。",
+            "data": {},
+            "failure": failure.model_dump(mode="json"),
+            "truncated": False,
+        }
 
 
 def inspect_coding_changes(context: CodingToolContext) -> CodingToolResult:
@@ -823,7 +867,7 @@ def save_final_patch(
             patch_path.unlink()
         if metadata_written and metadata_path.exists():
             metadata_path.unlink()
-        return tool_failure(str(exc))
+        return tool_failure(str(exc), "SOLUTION")
 
 
 def _current_head(context: CodingToolContext) -> str:
@@ -849,7 +893,7 @@ def _list_untracked_files(context: CodingToolContext) -> list[str]:
 
 def rollback_to_base(
     context: CodingToolContext,
-    reason: str,
+    primary_failure: FailureInfo,
     *,
     agent_report: dict[str, Any] | None = None,
 ) -> CodingToolResult:
@@ -861,15 +905,18 @@ def rollback_to_base(
         f"s{context.stage_call:02d}_i{iteration:02d}.json"
     )
     if failure_path.exists():
-        return tool_failure(f"失败记录已存在，禁止覆盖：{failure_path.name}")
+        return tool_failure(
+            f"失败记录已存在，禁止覆盖：{failure_path.name}",
+            "INTERNAL",
+        )
 
     failure: dict[str, Any] = {
-        "reason": reason.strip() or "未提供失败原因。",
+        "failure": primary_failure.model_dump(mode="json"),
         "agent_report": agent_report,
         "base_commit": context.base_commit,
         "changed_files_before_rollback": [],
         "rollback_success": False,
-        "rollback_error": None,
+        "rollback_failure": None,
     }
     envelope = {
         "stage": "CODING",
@@ -950,6 +997,13 @@ def rollback_to_base(
             },
         )
     except Exception as exc:
-        failure["rollback_error"] = str(exc)
+        rollback_failure = failure_from_exception(exc, "SAFETY")
+        failure["rollback_failure"] = rollback_failure.model_dump(mode="json")
         _atomic_write_json(failure_path, envelope)
-        return tool_failure(str(exc))
+        return {
+            "success": False,
+            "summary": "操作失败。",
+            "data": {},
+            "failure": rollback_failure.model_dump(mode="json"),
+            "truncated": False,
+        }

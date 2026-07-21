@@ -4,6 +4,7 @@ from langchain_core.runnables import RunnableLambda
 
 from schemas.coding_result import CodingResult
 from schemas.explore_report import ExploreReport
+from schemas.failure import make_failure
 from schemas.issue_specification import IssueSpec
 from schemas.review_result import ReviewResult
 from schemas.test_result import TestResult as SolverTestResult
@@ -20,7 +21,9 @@ def valid_report_markdown() -> str:
 - 结束阶段：FINALIZE
 - 修复轮次：1
 - 工作区：保留修改
+- 失败类型：无
 - 失败原因：无
+- 处理建议：无
 
 ## 问题与根因
 - Issue：搜索忽略大小写
@@ -144,7 +147,7 @@ def test_create_run_report_writes_model_markdown(tmp_path: Path) -> None:
 
     assert result.path == str(tmp_path / "report.md")
     assert result.fallback_used is False
-    assert result.error is None
+    assert result.failure is None
     assert (tmp_path / "report.md").read_text(encoding="utf-8") == markdown + "\n"
     assert len(captured) == 1
     messages = captured[0]
@@ -167,7 +170,8 @@ def test_create_run_report_falls_back_when_agent_fails(tmp_path: Path) -> None:
 
     report = (tmp_path / "report.md").read_text(encoding="utf-8")
     assert result.fallback_used is True
-    assert result.error == "模型不可用"
+    assert result.failure.type == "MODEL"
+    assert result.failure.message == "模型不可用"
     assert "## 问题与根因" in report
     assert "报告生成：程序模板（模型不可用）" in report
     assert "src/search.py:8 未统一大小写" in report
@@ -186,7 +190,7 @@ def test_create_run_report_falls_back_when_agent_returns_empty_text(
 
     report = (tmp_path / "report.md").read_text(encoding="utf-8")
     assert result.fallback_used is True
-    assert result.error == "Reporter 返回了空文本。"
+    assert result.failure.message == "Reporter 返回了空文本。"
     assert "## 验证结果" in report
 
 
@@ -205,7 +209,7 @@ def test_create_run_report_falls_back_when_agent_changes_template(
 
     report = (tmp_path / "report.md").read_text(encoding="utf-8")
     assert result.fallback_used is True
-    assert result.error == "Reporter 未使用固定报告标题。"
+    assert result.failure.message == "Reporter 未使用固定报告标题。"
     assert report.startswith("# Issue 修复报告\n")
     assert "- 报告生成：程序模板" in report
 
@@ -216,7 +220,7 @@ def test_create_run_report_without_model_uses_fallback(tmp_path: Path) -> None:
         "status": "FAILED",
         "phase": "INITIALIZE",
         "issue_input": "修复环境",
-        "error": "未发现虚拟环境",
+        "failure": make_failure("ENVIRONMENT", "未发现虚拟环境"),
     }
 
     result = create_run_report(
@@ -229,7 +233,7 @@ def test_create_run_report_without_model_uses_fallback(tmp_path: Path) -> None:
 
     report = (tmp_path / "report.md").read_text(encoding="utf-8")
     assert result.fallback_used is True
-    assert result.error is None
+    assert result.failure is None
     assert "状态：FAILED" in report
     assert "工作区：未修改" in report
     assert "未发现虚拟环境" in report
@@ -248,5 +252,5 @@ def test_create_run_report_never_overwrites_existing_report(tmp_path: Path) -> N
     )
 
     assert result.path is None
-    assert "禁止覆盖" in result.error
+    assert "禁止覆盖" in result.failure.message
     assert report_path.read_text(encoding="utf-8") == "existing\n"

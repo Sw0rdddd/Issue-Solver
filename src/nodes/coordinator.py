@@ -9,10 +9,16 @@ from prompts.coordinator import (
     build_coordinator_input,
 )
 from schemas.coordinator_decision import CoordinatorDecision
+from schemas.failure import (
+    ClassifiedFailure,
+    FailureInfo,
+    failure_from_exception,
+    make_failure,
+)
 
 
 def _failed_update(
-    message: str,
+    failure: FailureInfo,
     *,
     rollback_required: bool = False,
 ) -> dict:
@@ -20,15 +26,14 @@ def _failed_update(
         "phase": "COORDINATE",
         "status": "FAILED",
         "next_action": "FAILED",
-        "current_summary": message,
+        "current_summary": failure.message,
         "explore_focuses": [],
-        "error": message,
+        "failure": failure,
     }
     if rollback_required:
         update.update(
             {
                 "rollback_required": True,
-                "rollback_reason": message,
             }
         )
     return update
@@ -59,21 +64,34 @@ def build_coordinator_node(coordinator_agent: Any):
         try:
             issue = state.get("issue")
             if issue is None:
-                raise RuntimeError("State 中缺少规范化后的 Issue。")
+                raise ClassifiedFailure(
+                    make_failure("INTERNAL", "State 中缺少规范化后的 Issue。")
+                )
 
-            explore_errors = state.get("explore_errors", [])
-            if explore_errors:
-                raise RuntimeError(
-                    "并行仓库探索失败：" + "；".join(explore_errors)
+            explore_failures = state.get("explore_failures", [])
+            if explore_failures:
+                first = explore_failures[0]
+                raise ClassifiedFailure(
+                    first.model_copy(
+                        update={
+                            "message": "并行仓库探索失败："
+                            + "；".join(
+                                failure.message for failure in explore_failures
+                            )
+                        }
+                    )
                 )
 
             cycle = state.get("cycle", 0)
             max_cycles = state.get("max_cycles", Setting().MAX_CYCLES)
             if max_cycles < 1:
-                raise RuntimeError("max_cycles 必须大于 0。")
+                raise ClassifiedFailure(
+                    make_failure("INPUT", "max_cycles 必须大于 0。")
+                )
             if state.get("rollback_required"):
                 return _failed_update(
-                    state.get("rollback_reason", "工作区需要回滚。"),
+                    state.get("failure")
+                    or make_failure("SAFETY", "工作区需要回滚。"),
                     rollback_required=True,
                 )
 
@@ -89,8 +107,10 @@ def build_coordinator_node(coordinator_agent: Any):
                 )
             ):
                 return _failed_update(
-                    f"已达到最大循环次数 {max_cycles}。",
-                    rollback_required=bool(state.get("changed_files")),
+                    make_failure(
+                        "LIMIT",
+                        f"已达到最大循环次数 {max_cycles}。",
+                    )
                 )
 
             user_message = build_coordinator_input(
@@ -104,25 +124,41 @@ def build_coordinator_node(coordinator_agent: Any):
                 max_cycles=max_cycles,
             )
 
-            decision = coordinator_agent.invoke(
-                [
-                    SystemMessage(content=COORDINATOR_SYSTEM_PROMPT),
-                    HumanMessage(content=user_message),
-                ]
-            )
+            try:
+                decision = coordinator_agent.invoke(
+                    [
+                        SystemMessage(content=COORDINATOR_SYSTEM_PROMPT),
+                        HumanMessage(content=user_message),
+                    ]
+                )
+            except Exception as exc:
+                raise ClassifiedFailure(
+                    failure_from_exception(
+                        exc,
+                        "MODEL",
+                        prefix="Coordinator 决策失败：",
+                    )
+                ) from exc
 
             if not isinstance(decision, CoordinatorDecision):
-                raise RuntimeError(
-                    "Coordinator Agent 未返回有效的 CoordinatorDecision。"
+                raise ClassifiedFailure(
+                    make_failure(
+                        "MODEL",
+                        "Coordinator Agent 未返回有效的 CoordinatorDecision。",
+                    )
                 )
 
             if not explore_reports and decision.next_action != "EXPLORE":
-                raise RuntimeError("首次 Coordinator 决策必须为 EXPLORE。")
+                raise ClassifiedFailure(
+                    make_failure("MODEL", "首次 Coordinator 决策必须为 EXPLORE。")
+                )
 
             if decision.next_action in {"EXPLORE", "CODE"} and cycle >= max_cycles:
                 return _failed_update(
-                    f"已达到最大循环次数 {max_cycles}。",
-                    rollback_required=True,
+                    make_failure(
+                        "LIMIT",
+                        f"已达到最大循环次数 {max_cycles}。",
+                    )
                 )
 
             if decision.next_action == "FINISH":
@@ -136,8 +172,11 @@ def build_coordinator_node(coordinator_agent: Any):
                         for result in latest_test_results
                     )
                 ):
-                    raise RuntimeError(
-                        "Review 和本轮全部测试均通过后才能 FINISH。"
+                    raise ClassifiedFailure(
+                        make_failure(
+                            "MODEL",
+                            "Review 和本轮全部测试均通过后才能 FINISH。",
+                        )
                     )
 
             update = {
@@ -170,7 +209,9 @@ def build_coordinator_node(coordinator_agent: Any):
                 coding_task = decision.coding_task
                 existing_files = state.get("changed_files", [])
                 if coding_task is None:
-                    raise RuntimeError("CODE 决策缺少 CodingTask。")
+                    raise ClassifiedFailure(
+                        make_failure("MODEL", "CODE 决策缺少 CodingTask。")
+                    )
                 missing_scope = [
                     path
                     for path in existing_files
@@ -180,9 +221,12 @@ def build_coordinator_node(coordinator_agent: Any):
                     )
                 ]
                 if missing_scope:
-                    raise RuntimeError(
-                        "返工 CodingTask.allowed_scope 未覆盖累计修改："
-                        + ", ".join(missing_scope)
+                    raise ClassifiedFailure(
+                        make_failure(
+                            "MODEL",
+                            "返工 CodingTask.allowed_scope 未覆盖累计修改："
+                            + ", ".join(missing_scope),
+                        )
                     )
                 coding_stage_call = _next_stage_call(
                     state,
@@ -206,13 +250,22 @@ def build_coordinator_node(coordinator_agent: Any):
                     {
                         "phase": "COORDINATE",
                         "status": "FAILED",
-                        "error": decision.current_summary,
+                        "failure": decision.failure,
                     }
                 )
 
             return update
 
         except Exception as exc:
-            return _failed_update(f"Coordinator 决策失败：{exc}")
+            return _failed_update(
+                failure_from_exception(
+                    exc,
+                    "INTERNAL",
+                    prefix=(
+                        "" if isinstance(exc, ClassifiedFailure)
+                        else "Coordinator 决策失败："
+                    ),
+                )
+            )
 
     return coordinator_node

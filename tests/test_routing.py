@@ -4,6 +4,7 @@ from langgraph.types import Send
 
 from graph.routing import route_after_coordinator, route_after_step
 from graph.state import ResolverState
+from schemas.failure import make_failure
 from schemas.explore_report import ExploreReport
 
 
@@ -70,13 +71,14 @@ def test_parallel_explore_errors_are_reduced_before_failure() -> None:
     coordinator_calls: list[list[str]] = []
 
     def coordinator_node(state: dict) -> dict:
-        errors = state.get("explore_errors", [])
-        coordinator_calls.append(sorted(errors))
-        if errors:
+        failures = state.get("explore_failures", [])
+        messages = sorted(failure.message for failure in failures)
+        coordinator_calls.append(messages)
+        if failures:
             return {
                 "status": "FAILED",
                 "next_action": "FAILED",
-                "error": "；".join(errors),
+                "failure": make_failure("MODEL", "；".join(messages)),
             }
         return {
             "next_action": "EXPLORE",
@@ -87,7 +89,9 @@ def test_parallel_explore_errors_are_reduced_before_failure() -> None:
         focus = state["explore_focus"]
         if focus == "成功分支":
             return {"explore_reports": [make_report()]}
-        return {"explore_errors": [f"{focus}异常"]}
+        return {
+            "explore_failures": [make_failure("MODEL", f"{focus}异常")]
+        }
 
     graph = StateGraph(ResolverState)
     graph.add_node("coordinator", coordinator_node)
@@ -108,7 +112,7 @@ def test_parallel_explore_errors_are_reduced_before_failure() -> None:
         {
             "status": "RUNNING",
             "explore_reports": [],
-            "explore_errors": [],
+            "explore_failures": [],
         }
     )
 

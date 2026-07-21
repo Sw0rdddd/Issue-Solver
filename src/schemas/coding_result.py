@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from schemas.failure import FailureInfo
 
 
 class CodingResult(BaseModel):
@@ -19,3 +21,12 @@ class CodingResult(BaseModel):
     )
     validation: list[str] = Field(description="已执行的读取、修改和差异检查")
     remaining_risks: list[str] = Field(description="仍未确认或可能存在的问题")
+    failure: FailureInfo | None = None
+
+    @model_validator(mode="after")
+    def validate_failure_matches_success(self) -> "CodingResult":
+        if self.success and self.failure is not None:
+            raise ValueError("成功的 CodingResult 不能包含 failure。")
+        if not self.success and self.failure is None:
+            raise ValueError("失败的 CodingResult 必须包含 failure。")
+        return self

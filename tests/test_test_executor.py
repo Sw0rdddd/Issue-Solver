@@ -118,6 +118,10 @@ def test_execute_test_command_records_complete_logs(
     )
 
     assert result.status == expected_status
+    if expected_status == "PASSED":
+        assert result.failure is None
+    else:
+        assert result.failure.type == "SOLUTION"
     assert result.resolved_command[:3] == [
         str(Path(sys.executable).resolve()),
         "-m",
@@ -154,6 +158,7 @@ def test_execute_test_command_times_out(tmp_path: Path) -> None:
     )
 
     assert result.status == "TIMEOUT"
+    assert result.failure.type == "LIMIT"
     assert result.exit_code == -1
     assert "进程已终止" in Path(result.stderr_path).read_text(encoding="utf-8")
 
@@ -176,6 +181,7 @@ def test_execute_test_command_maps_rejected_command_to_environment_error(
     )
 
     assert result.status == "ENVIRONMENT_ERROR"
+    assert result.failure.type == "ENVIRONMENT"
     assert result.exit_code == -1
     assert "仅允许" in result.output_tail
 
@@ -200,6 +206,7 @@ def test_missing_test_dependency_is_environment_error(tmp_path: Path) -> None:
     )
 
     assert result.status == "ENVIRONMENT_ERROR"
+    assert result.failure.type == "ENVIRONMENT"
     assert result.exit_code == -1
     assert "package_that_does_not_exist_12345" in result.output_tail
 

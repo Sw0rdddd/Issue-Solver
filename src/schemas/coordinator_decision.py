@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from graph.state import NextAction
 from schemas.coding_task import CodingTask
+from schemas.failure import FailureInfo
 
 
 class CoordinatorDecision(BaseModel):
@@ -14,6 +15,7 @@ class CoordinatorDecision(BaseModel):
         max_length=3,
     )
     coding_task: CodingTask | None = None
+    failure: FailureInfo | None = None
 
     @model_validator(mode="after")
     def validate_action_payload(self) -> "CoordinatorDecision":
@@ -21,18 +23,28 @@ class CoordinatorDecision(BaseModel):
             raise ValueError("Explore 目标不能为空字符串。")
 
         if self.next_action == "EXPLORE":
+            if self.failure is not None:
+                raise ValueError("EXPLORE 决策不能包含 failure。")
             if not self.explore_focuses:
                 raise ValueError("EXPLORE 决策必须包含 Explore 目标。")
             if self.coding_task is not None:
                 raise ValueError("EXPLORE 决策不能包含 CodingTask。")
         elif self.next_action == "CODE":
+            if self.failure is not None:
+                raise ValueError("CODE 决策不能包含 failure。")
             if self.explore_focuses:
                 raise ValueError("CODE 决策不能包含 Explore 目标。")
             if self.coding_task is None:
                 raise ValueError("CODE 决策必须包含 CodingTask。")
-        elif self.explore_focuses or self.coding_task is not None:
-            raise ValueError(
-                "FINISH 或 FAILED 决策不能包含执行任务。"
-            )
+        elif self.next_action == "FINISH":
+            if self.failure is not None:
+                raise ValueError("FINISH 决策不能包含 failure。")
+            if self.explore_focuses or self.coding_task is not None:
+                raise ValueError("FINISH 决策不能包含执行任务。")
+        else:
+            if self.failure is None:
+                raise ValueError("FAILED 决策必须包含 failure。")
+            if self.explore_focuses or self.coding_task is not None:
+                raise ValueError("FAILED 决策不能包含执行任务。")
 
         return self

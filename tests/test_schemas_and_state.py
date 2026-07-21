@@ -7,6 +7,7 @@ from graph.state import NextAction, Phase, ResolverState, RunStatus
 from schemas.coding_result import CodingResult
 from schemas.coding_task import CodingTask
 from schemas.explore_report import ExploreReport
+from schemas.failure import FailureInfo, make_failure
 from schemas.issue_specification import IssueSpec
 from schemas.review_result import ReviewResult
 from schemas.test_result import TestResult as ExecutionResult
@@ -56,6 +57,7 @@ def test_issue_spec_defaults_and_json_serialization() -> None:
                 "diff_path": None,
                 "validation": ["已调用 inspect_changes 检查累计差异"],
                 "remaining_risks": [],
+                "failure": None,
             },
         ),
         (
@@ -80,6 +82,7 @@ def test_issue_spec_defaults_and_json_serialization() -> None:
                 "stdout_path": "stdout.log",
                 "stderr_path": "stderr.log",
                 "output_tail": "[stdout] 1 passed",
+                "failure": None,
             },
         ),
     ],
@@ -104,6 +107,63 @@ def test_schema_accepts_complete_payload(model: type, payload: dict) -> None:
 def test_schema_rejects_missing_required_fields(model: type) -> None:
     with pytest.raises(ValidationError):
         model.model_validate({})
+
+
+@pytest.mark.parametrize(
+    "failure_type",
+    [
+        "INPUT",
+        "ENVIRONMENT",
+        "MODEL",
+        "SOLUTION",
+        "SAFETY",
+        "LIMIT",
+        "INTERNAL",
+    ],
+)
+def test_failure_info_accepts_supported_types(failure_type: str) -> None:
+    failure = FailureInfo(
+        type=failure_type,
+        message="具体原因",
+        suggestion="下一步建议",
+    )
+
+    assert failure.type == failure_type
+
+
+def test_failure_info_rejects_unknown_type_and_extra_fields() -> None:
+    with pytest.raises(ValidationError):
+        FailureInfo.model_validate(
+            {
+                "type": "UNKNOWN",
+                "message": "原因",
+                "suggestion": "建议",
+                "code": "legacy",
+            }
+        )
+
+
+def test_coding_result_requires_failure_only_when_unsuccessful() -> None:
+    with pytest.raises(ValidationError):
+        CodingResult(
+            success=False,
+            changed_files=[],
+            summary="未完成",
+            diff_path=None,
+            validation=[],
+            remaining_risks=[],
+        )
+
+    result = CodingResult(
+        success=False,
+        changed_files=[],
+        summary="未完成",
+        diff_path=None,
+        validation=[],
+        remaining_risks=[],
+        failure=make_failure("SOLUTION", "方案无效"),
+    )
+    assert result.failure.type == "SOLUTION"
 
 
 def test_coding_result_rejects_legacy_string_fields() -> None:
@@ -399,7 +459,7 @@ def test_resolver_state_required_and_optional_keys() -> None:
             "coding_iteration",
             "coding_task",
             "explore_reports",
-            "explore_errors",
+            "explore_failures",
             "coding_result",
             "changed_files",
             "diff_path",
@@ -409,10 +469,9 @@ def test_resolver_state_required_and_optional_keys() -> None:
             "max_cycles",
             "test_timeout",
             "test_tail_lines",
-            "rollback_prompt_required",
             "rollback_required",
-            "rollback_reason",
-            "error",
+            "rollback_failure",
+            "failure",
         }
     )
 

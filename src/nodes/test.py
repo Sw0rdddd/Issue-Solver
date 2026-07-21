@@ -4,10 +4,11 @@ from config import Setting
 from graph.state import ResolverState
 from schemas.coding_task import CodingTask
 from schemas.environment_info import EnvironmentInfo
+from schemas.failure import failure_from_exception, make_failure
 from schemas.test_result import TestResult
 from services.artifacts import write_round_artifact
 from services.test_executor import (
-    append_environment_error,
+    append_safety_error,
     build_targeted_test_command,
     execute_test_command,
     worktree_fingerprint,
@@ -77,7 +78,7 @@ def build_test_node():
             after = worktree_fingerprint(repo_path, base_commit)
             rollback_required = before != after
             if rollback_required:
-                results[-1] = append_environment_error(
+                results[-1] = append_safety_error(
                     results[-1],
                     "测试执行修改了 Git 工作区。",
                     tail_lines,
@@ -101,7 +102,11 @@ def build_test_node():
                 update.update(
                     {
                         "rollback_required": True,
-                        "rollback_reason": "测试执行修改了 Git 工作区。",
+                        "failure": make_failure(
+                            "SAFETY",
+                            "测试执行修改了 Git 工作区。",
+                            "检查测试副作用；工作区必须回滚后才能重试。",
+                        ),
                     }
                 )
             elif any(result.status == "ENVIRONMENT_ERROR" for result in results):
@@ -109,15 +114,21 @@ def build_test_node():
                     {
                         "phase": "TEST",
                         "status": "FAILED",
-                        "error": (
-                            "测试环境不可用；请开发者修复目标仓库虚拟环境及依赖后重试。"
+                        "failure": make_failure(
+                            "ENVIRONMENT",
+                            "测试环境不可用。",
+                            "请开发者修复目标仓库虚拟环境及依赖后重试。",
                         ),
                     }
                 )
             return update
 
         except Exception as exc:
-            error = f"Test 失败：{exc}"
+            failure = failure_from_exception(
+                exc,
+                "INTERNAL",
+                prefix="Test 失败：",
+            )
             if run_dir:
                 try:
                     write_round_artifact(
@@ -126,17 +137,20 @@ def build_test_node():
                         stage="TEST",
                         repair_round=max(repair_round, 1),
                         payload={
-                            "reason": error,
+                            "failure": failure,
                             "results": results,
                         },
                     )
                 except Exception as log_exc:
-                    error = f"{error}；记录失败产物失败：{log_exc}"
+                    failure = make_failure(
+                        "INTERNAL",
+                        f"{failure.message}；记录失败产物失败：{log_exc}",
+                    )
             return {
                 "phase": "TEST",
                 "status": "FAILED",
                 "repair_round": max(repair_round, 1),
-                "error": error,
+                "failure": failure,
             }
 
     return test_node

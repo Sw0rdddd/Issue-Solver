@@ -13,6 +13,7 @@ from cli import run as run_module
 from cli.terminal import TerminalReporter
 from config import Setting
 from schemas.environment_info import EnvironmentInfo
+from schemas.failure import ClassifiedFailure, make_failure
 from services.report import ReportResult
 
 
@@ -274,7 +275,7 @@ def test_run_root_must_be_outside_target_repo(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
-    with pytest.raises(ValueError, match="目标 Git 仓库之外"):
+    with pytest.raises(ClassifiedFailure, match="目标 Git 仓库之外"):
         run_module._resolve_run_root(repo_root, repo_root / ".runs")
 
 
@@ -374,7 +375,7 @@ def test_run_streams_graph_with_initial_state_and_progress(
             source=".venv",
         ),
         "explore_reports": [],
-        "explore_errors": [],
+        "explore_failures": [],
         "test_results": [],
         "latest_test_results": [],
         "explore_stage_call": 0,
@@ -530,11 +531,12 @@ def test_run_returns_one_when_graph_fails(
     repo_root, compiled_graph, _ = prepare_runtime(monkeypatch, tmp_path)
 
     def stream(state: dict[str, object], *, stream_mode: list[str]):
-        failure = {**state, "status": "FAILED", "error": "无法解析 Issue"}
+        failure_info = make_failure("INPUT", "无法解析 Issue")
+        failure = {**state, "status": "FAILED", "failure": failure_info}
         yield "updates", {
             "parse_issue": {
                 "status": "FAILED",
-                "error": "无法解析 Issue",
+                "failure": failure_info,
             }
         }
         yield "values", failure
@@ -573,13 +575,13 @@ def test_run_displays_coding_failure_coordinates(
             **state,
             "phase": "CODE",
             "status": "FAILED",
-            "error": "Coding 失败：Diff 为空",
+            "failure": make_failure("SOLUTION", "Coding 失败：Diff 为空"),
         }
         yield "updates", {
             "coding": {
                 "phase": "CODE",
                 "status": "FAILED",
-                "error": "Coding 失败：Diff 为空",
+                "failure": make_failure("SOLUTION", "Coding 失败：Diff 为空"),
                 "repair_round": 2,
                 "coding_stage_call": 1,
                 "coding_iteration": 3,
@@ -628,7 +630,7 @@ def test_run_returns_one_when_graph_raises(
     assert "42" in captured.out
     report_call = report_module.create_run_report.call_args.kwargs
     assert report_call["state"]["status"] == "FAILED"
-    assert report_call["state"]["error"] == "模型不可用"
+    assert report_call["state"]["failure"].message == "模型不可用"
 
 
 def test_failed_run_reports_after_rollback_decision(
@@ -642,17 +644,17 @@ def test_failed_run_reports_after_rollback_decision(
             **state,
             "phase": "REVIEW",
             "status": "FAILED",
-            "error": "Review 失败",
-            "rollback_prompt_required": True,
+            "failure": make_failure("MODEL", "Review 失败"),
             "changed_files": ["app.py"],
         }
         yield "values", result
 
-    def rollback(result: dict, reporter: TerminalReporter) -> None:
+    def rollback(result: dict, reporter: TerminalReporter) -> bool:
         result["changed_files"] = []
+        return True
 
     compiled_graph.stream.side_effect = stream
-    monkeypatch.setattr(run_module, "_prompt_review_rollback", rollback)
+    monkeypatch.setattr(run_module, "_prompt_failure_rollback", rollback)
 
     exit_code = main_module.main(
         ["run", "--repo", str(repo_root), "--issue", "失败场景"]
@@ -664,7 +666,7 @@ def test_failed_run_reports_after_rollback_decision(
     assert report_call["worktree_status"] == "已回滚"
 
 
-def test_review_failure_interactively_rolls_back_and_records_decision(
+def test_failure_with_changes_interactively_rolls_back_and_records_decision(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -674,9 +676,9 @@ def test_review_failure_interactively_rolls_back_and_records_decision(
     result = {
         "run_dir": str(run_dir),
         "repair_round": 2,
-        "rollback_prompt_required": True,
-        "rollback_reason": "Review 失败",
-        "error": "Review 失败",
+        "phase": "TEST",
+        "status": "FAILED",
+        "failure": make_failure("ENVIRONMENT", "测试环境不可用"),
         "changed_files": ["app.py"],
     }
     monkeypatch.setattr(run_module.sys.stdin, "isatty", lambda: True)
@@ -684,29 +686,34 @@ def test_review_failure_interactively_rolls_back_and_records_decision(
     monkeypatch.setattr(
         run_module,
         "rollback_state_to_base",
-        lambda state, reason: {
+        lambda state, failure: {
             "success": True,
             "summary": "rolled back",
             "data": {},
-            "error": None,
+            "failure": None,
             "truncated": False,
         },
     )
 
-    run_module._prompt_review_rollback(result, TerminalReporter())
+    rollback_succeeded = run_module._prompt_failure_rollback(
+        result,
+        TerminalReporter(),
+    )
 
+    assert rollback_succeeded is True
     assert result["changed_files"] == []
     decision = json.loads(
         (run_dir / "logs" / "rollback_decision_r02.json").read_text(
             encoding="utf-8"
         )
     )
+    assert decision["stage"] == "TEST"
     assert decision["payload"]["decision"] == "ROLLBACK"
     assert decision["payload"]["rollback_success"] is True
     assert "已回滚" in capsys.readouterr().out
 
 
-def test_review_failure_noninteractive_keeps_workspace(
+def test_failure_with_changes_noninteractive_keeps_workspace(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -715,16 +722,21 @@ def test_review_failure_noninteractive_keeps_workspace(
     result = {
         "run_dir": str(run_dir),
         "repair_round": 1,
-        "rollback_prompt_required": True,
-        "error": "Review 失败",
+        "phase": "COORDINATE",
+        "status": "FAILED",
+        "failure": make_failure("LIMIT", "达到最大循环次数"),
         "changed_files": ["app.py"],
     }
     monkeypatch.setattr(run_module.sys, "stdin", io.StringIO())
     rollback = Mock(side_effect=AssertionError("不应回滚"))
     monkeypatch.setattr(run_module, "rollback_state_to_base", rollback)
 
-    run_module._prompt_review_rollback(result, TerminalReporter())
+    rollback_succeeded = run_module._prompt_failure_rollback(
+        result,
+        TerminalReporter(),
+    )
 
+    assert rollback_succeeded is False
     assert result["changed_files"] == ["app.py"]
     rollback.assert_not_called()
     decision = json.loads(
@@ -732,4 +744,33 @@ def test_review_failure_noninteractive_keeps_workspace(
             encoding="utf-8"
         )
     )
+    assert decision["stage"] == "COORDINATE"
     assert decision["payload"]["decision"] == "KEEP_NON_INTERACTIVE"
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"status": "FAILED", "changed_files": []},
+        {
+            "status": "FAILED",
+            "changed_files": ["app.py"],
+            "rollback_required": True,
+        },
+        {"status": "FINISHED", "changed_files": ["app.py"]},
+    ],
+)
+def test_rollback_prompt_skips_ineligible_results(
+    monkeypatch: pytest.MonkeyPatch,
+    result: dict,
+) -> None:
+    monkeypatch.setattr(
+        run_module.sys.stdin,
+        "isatty",
+        lambda: (_ for _ in ()).throw(AssertionError("不应检查终端")),
+    )
+
+    assert (
+        run_module._prompt_failure_rollback(result, TerminalReporter())
+        is False
+    )

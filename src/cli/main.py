@@ -9,6 +9,7 @@ from langchain_core.callbacks import (
 from cli.arguments import build_parser
 from cli.run import run_command
 from cli.terminal import TerminalReporter
+from schemas.failure import failure_from_exception
 
 
 def _total_tokens(callback: UsageMetadataCallbackHandler) -> int:
@@ -44,7 +45,11 @@ def main(
                     global_mode=global_mode,
                 )
             except Exception as exc:
-                reporter.error_block("运行失败", [("原因", exc)])
+                failure = failure_from_exception(exc, "INTERNAL")
+                reporter.error_block(
+                    "运行失败",
+                    reporter.failure_details(failure),
+                )
                 reporter.set_outcome(success=False)
                 return 1
             finally:

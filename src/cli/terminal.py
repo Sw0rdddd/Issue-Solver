@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from schemas.environment_info import EnvironmentInfo
+from schemas.failure import FailureInfo, make_failure
 from services.report import ReportResult
 
 
@@ -269,7 +270,7 @@ class TerminalReporter:
         elapsed = self._duration("initialize")
         if update.get("status") == "FAILED":
             self._progress(f"✗ 初始化仓库失败 · {elapsed:.2f} 秒")
-            self._detail("原因", update.get("error", "未知错误"))
+            self._show_failure(update)
             return
 
         self._progress(f"✓ 初始化仓库 · {elapsed:.2f} 秒")
@@ -284,7 +285,7 @@ class TerminalReporter:
         elapsed = self._duration("parse_issue")
         if update.get("status") == "FAILED":
             self._progress(f"✗ 解析 Issue 失败 · {elapsed:.2f} 秒")
-            self._detail("原因", update.get("error", "未知错误"))
+            self._show_failure(update)
             return
 
         issue = update.get("issue")
@@ -299,11 +300,7 @@ class TerminalReporter:
         if update.get("status") == "FAILED" or action == "FAILED":
             self._ensure_round(repair_round)
             self._progress(f"  ✗ Coordinator 失败 · {elapsed:.2f} 秒")
-            self._detail(
-                "原因",
-                update.get("error", update.get("current_summary", "未知错误")),
-                indent=4,
-            )
+            self._show_failure(update, indent=4)
             self.start_timing("finalize")
             return
 
@@ -343,9 +340,12 @@ class TerminalReporter:
         self.explore_completed += 1
         total = f"{self.explore_total:02d}" if self.explore_total else "?"
         progress = f"i{self.explore_completed:02d}/{total}"
-        errors = update.get("explore_errors", [])
-        if errors:
-            self._progress(f"    ✗ {progress}  {'；'.join(errors)}")
+        failures = update.get("explore_failures", [])
+        if failures:
+            messages = [
+                FailureInfo.model_validate(item).message for item in failures
+            ]
+            self._progress(f"    ✗ {progress}  {'；'.join(messages)}")
         else:
             reports = update.get("explore_reports", [])
             focus = (
@@ -372,7 +372,7 @@ class TerminalReporter:
             self._progress(
                 f"  ✗ Coding s{stage_call:02d}/i{iteration:02d} 失败 · {elapsed:.2f} 秒"
             )
-            self._detail("原因", update.get("error", "未知错误"), indent=4)
+            self._show_failure(update, indent=4)
             return
 
         result = update.get("coding_result")
@@ -391,7 +391,7 @@ class TerminalReporter:
         elapsed = self._duration("review")
         if update.get("status") == "FAILED":
             self._progress(f"  ✗ Review 失败 · {elapsed:.2f} 秒")
-            self._detail("原因", update.get("error", "未知错误"), indent=4)
+            self._show_failure(update, indent=4)
             return
 
         result = update.get("review_result")
@@ -408,7 +408,7 @@ class TerminalReporter:
         elapsed = self._duration("test")
         if update.get("status") == "FAILED":
             self._progress(f"  ✗ Test 失败 · {elapsed:.2f} 秒")
-            self._detail("原因", update.get("error", "未知错误"), indent=4)
+            self._show_failure(update, indent=4)
             return
 
         results = update.get("latest_test_results", [])
@@ -441,14 +441,19 @@ class TerminalReporter:
             self._detail("工作区", "失败修改已回滚到 base commit")
         else:
             self._progress(f"✗ Finalize 失败 · {elapsed:.2f} 秒")
-            self._detail("原因", update.get("error", "运行失败，工作区已保留"))
+            self._show_failure(update)
 
     def report_completed(self, result: ReportResult) -> None:
         elapsed = self._duration("report")
         self.report_path = result.path
         if result.path is None:
             self._progress(f"✗ Report 保存失败 · {elapsed:.2f} 秒")
-            self._detail("原因", result.error or "未知错误")
+            failure = result.failure or make_failure(
+                "INTERNAL",
+                "报告保存失败但未提供原因。",
+            )
+            for label, value in self.failure_details(failure):
+                self._detail(label, value)
             return
 
         if result.fallback_used:
@@ -461,6 +466,30 @@ class TerminalReporter:
         self._write(f"✗ {title}", error=True)
         for label, value in details:
             self._write(f"  │ {label}：{value}", error=True)
+
+    @staticmethod
+    def failure_details(failure: FailureInfo) -> list[tuple[str, object]]:
+        return [
+            ("类型", failure.type),
+            ("原因", failure.message),
+            ("建议", failure.suggestion),
+        ]
+
+    def failure_notice(self, title: str, failure: FailureInfo) -> None:
+        self.error_block(title, self.failure_details(failure))
+
+    def _show_failure(
+        self,
+        update: dict[str, Any],
+        *,
+        indent: int = 2,
+    ) -> None:
+        failure = FailureInfo.model_validate(
+            update.get("failure")
+            or make_failure("INTERNAL", "未知错误。")
+        )
+        for label, value in self.failure_details(failure):
+            self._detail(label, value, indent=indent)
 
     def notice(self, value: str, *, error: bool = False) -> None:
         self._write(value, error=error)

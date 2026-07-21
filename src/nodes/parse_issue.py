@@ -7,6 +7,7 @@ from prompts.issue_parser import (
     build_issue_parser_input,
 )
 from schemas.issue_specification import IssueSpec
+from schemas.failure import failure_from_exception
 from services.artifacts import ensure_run_logs_directory
 from services.issue_loader import load_issue
 from services.structured_output import with_structured_output_retry
@@ -28,7 +29,26 @@ def build_parse_issue_node(model: BaseChatModel):
 
         try:
             # 1. 加载文本或 GitHub Issue
-            raw_issue = load_issue(state["issue_input"])
+            try:
+                raw_issue = load_issue(state["issue_input"])
+            except ValueError as exc:
+                return {
+                    "status": "FAILED",
+                    "failure": failure_from_exception(
+                        exc,
+                        "INPUT",
+                        prefix="Issue 加载失败：",
+                    ),
+                }
+            except Exception as exc:
+                return {
+                    "status": "FAILED",
+                    "failure": failure_from_exception(
+                        exc,
+                        "ENVIRONMENT",
+                        prefix="Issue 加载失败：",
+                    ),
+                }
 
             # 2. 构造发送给模型的用户消息
             user_message = build_issue_parser_input(
@@ -38,10 +58,20 @@ def build_parse_issue_node(model: BaseChatModel):
             )
 
             # 3. 将原始 Issue 转换成 IssueSpec
-            issue = structured_model.invoke([
-                    SystemMessage(content=ISSUE_PARSER_SYSTEM_PROMPT),
-                    HumanMessage(content=user_message),
-                ])
+            try:
+                issue = structured_model.invoke([
+                        SystemMessage(content=ISSUE_PARSER_SYSTEM_PROMPT),
+                        HumanMessage(content=user_message),
+                    ])
+            except Exception as exc:
+                return {
+                    "status": "FAILED",
+                    "failure": failure_from_exception(
+                        exc,
+                        "MODEL",
+                        prefix="Issue 解析失败：",
+                    ),
+                }
 
             # 4. 保存规范化后的 Issue
             issue_path = (
@@ -59,7 +89,11 @@ def build_parse_issue_node(model: BaseChatModel):
         except Exception as exc:
             return {
                 "status": "FAILED",
-                "error": f"Issue 解析失败：{exc}",
+                "failure": failure_from_exception(
+                    exc,
+                    "INTERNAL",
+                    prefix="Issue 解析失败：",
+                ),
             }
 
     return parse_issue_node

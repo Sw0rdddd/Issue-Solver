@@ -3,6 +3,7 @@ import subprocess
 from pathlib import Path
 
 from nodes.finalize import build_finalize_node
+from schemas.failure import make_failure
 from schemas.review_result import ReviewResult
 from schemas.test_result import TestResult as ExecutionResult
 from tools.coding import CodingToolContext, build_coding_tools
@@ -103,7 +104,7 @@ def test_finalize_rolls_back_when_limit_requires_it(git_repo: Path) -> None:
             "next_action": "FAILED",
             "status": "FAILED",
             "rollback_required": True,
-            "rollback_reason": "达到最大循环次数 5",
+            "failure": make_failure("LIMIT", "达到最大循环次数 5"),
         }
     )
 

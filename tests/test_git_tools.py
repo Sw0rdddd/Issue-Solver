@@ -90,4 +90,5 @@ def test_git_show_reports_invalid_commit(git_repo: Path) -> None:
         }
     )
 
-    assert "错误：git show 执行失败" in result
+    assert "错误类型：ENVIRONMENT" in result
+    assert "git show 执行失败" in result
