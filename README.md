@@ -2,6 +2,12 @@
 
 `issue-solver` 是一个面向本地 Git 仓库的 Issue 修复工作流：解析 Issue、探索代码、生成修改、Review，并在目标仓库的本地 Python 环境中执行真实测试。
 
+## Workflow
+
+<p align="center">
+  <img src="assets/workflow.gif" width="1200" alt="Issue-Solver Workflow">
+</p>
+
 ## 前置条件
 
 - Python 3.13+；
@@ -89,9 +95,10 @@ issue-solver run --issue <issue-url-or-text>
 - 配置文件始终是本项目根目录的 `.env`；
 - 模型接口使用 OpenAI Chat Completions 格式；程序优先根据 `MODEL_NAME`、其次根据 `BASE_URL` 自动识别供应商；
 - `REASONING_HISTORY=auto` 会为 DeepSeek、GLM、Kimi 和 MiMo 回填多轮工具调用所需的 `reasoning_content`，OpenAI、Gemini、Qwen 和未知服务默认不回填；必要时可设为 `true` 或 `false` 强制覆盖，Qwen 设为 `true` 时也会发送 `preserve_thinking=true`；
+- 工具 Agent 默认每次最多执行 60 步，每轮最多探索 5 批，可通过 `AGENT_RECURSION_LIMIT` 和 `MAX_EXPLORE_BATCHES` 调整；
 - 两种命令的运行记录默认都位于 `.issue-solver-runs/<repo>/<run-id>/`；
 - 详细 JSON、audit、测试输出和运行时目录统一保存在 `run-id/logs/`；
-- `report.md` 与最终 `diff.patch`、`diff.json` 保留在 `run-id/` 根部；模型总结不可用时自动使用程序模板；
+- `report.md` 与最终 `diff.patch`、`diff.json` 保留在 `run-id/` 根部；报告由模型总结和程序生成的运行结果组成，模型不可用时自动使用程序模板；
 - 失败统一使用 `FailureInfo` 输出 `type`、`message`、`suggestion`；CLI、报告、JSON 产物和 Agent 工具反馈使用同一组错误类型；
 - 运行失败且存在修改时，交互终端默认询问是否回滚；非交互运行默认保留，安全违规和 Coding 中途失败仍自动回滚；
 - `RUN_ROOT` 可在 `.env` 配置，`--run-root` 可临时覆盖；运行日志不得写入目标仓库。

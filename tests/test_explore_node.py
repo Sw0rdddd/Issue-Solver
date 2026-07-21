@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, StateGraph
 
 from graph.routing import route_after_coordinator
@@ -19,9 +20,11 @@ class FakeExploreAgent:
         self.result = result
         self.error = error
         self.calls: list[dict] = []
+        self.configs: list[dict | None] = []
 
-    def invoke(self, payload: dict) -> dict:
+    def invoke(self, payload: dict, config: dict | None = None) -> dict:
         self.calls.append(payload)
+        self.configs.append(config)
         if self.error is not None:
             raise self.error
         assert self.result is not None
@@ -81,6 +84,7 @@ def test_explore_node_uses_custom_focus_and_saves_next_report(
     assert message["role"] == "user"
     assert focus in message["content"]
     assert "Issue 已完成规范化" in message["content"]
+    assert agent.configs == [{"recursion_limit": 60}]
 
     report_path = tmp_path / "logs" / "explore_r02_s03_i02.json"
     saved = json.loads(report_path.read_text(encoding="utf-8"))
@@ -171,6 +175,26 @@ def test_explore_node_returns_agent_error(tmp_path: Path) -> None:
     assert result["explore_failures"][0].type == "MODEL"
     assert result["explore_failures"][0].message == "仓库探索失败：模型调用失败"
     assert not list((tmp_path / "logs").glob("explore_*.json"))
+
+
+def test_explore_node_classifies_recursion_limit(tmp_path: Path) -> None:
+    agent = FakeExploreAgent(
+        error=GraphRecursionError("Recursion limit of 60 reached")
+    )
+    node = build_explore_node(agent)
+
+    result = node(
+        {
+            "issue": make_issue(),
+            "repo_path": str(tmp_path),
+            "run_dir": str(tmp_path),
+            "agent_recursion_limit": 60,
+        }
+    )
+
+    failure = result["explore_failures"][0]
+    assert failure.type == "LIMIT"
+    assert failure.message == "仓库探索失败：Explore Agent 达到最大执行步数 60。"
 
 
 def test_explore_node_uses_send_coordinates(tmp_path: Path) -> None:

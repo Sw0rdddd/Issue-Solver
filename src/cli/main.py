@@ -50,7 +50,10 @@ def main(
                     "运行失败",
                     reporter.failure_details(failure),
                 )
-                reporter.set_outcome(success=False)
+                reporter.set_outcome(
+                    success=False,
+                    result={"failure": failure},
+                )
                 return 1
             finally:
                 reporter.summary(

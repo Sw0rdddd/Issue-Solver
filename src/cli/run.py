@@ -26,6 +26,15 @@ from cli.terminal import TerminalReporter
 CONTROLLER_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _workflow_recursion_limit(
+    max_cycles: int,
+    max_explore_batches: int,
+) -> int:
+    """覆盖配置允许的完整外层工作流节点数。"""
+
+    return 5 + max_cycles * (2 * max_explore_batches + 4)
+
+
 def _resolve_run_root(
     repo_root: Path,
     configured_root: str | Path,
@@ -261,6 +270,7 @@ def run_command(
         )
         reporter.set_outcome(
             success=False,
+            result={"failure": failure},
             phase="INITIALIZE",
             worktree_status="未修改",
         )
@@ -302,6 +312,8 @@ def run_command(
         initial_state = {
             **report_state,
             "max_cycles": args.max_cycles or setting.MAX_CYCLES,
+            "agent_recursion_limit": setting.AGENT_RECURSION_LIMIT,
+            "max_explore_batches": setting.MAX_EXPLORE_BATCHES,
             "test_timeout": args.test_timeout or setting.TEST_TIMEOUT,
             "test_tail_lines": args.test_tail_lines or setting.TEST_TAIL_LINES,
             "explore_reports": [],
@@ -313,6 +325,14 @@ def run_command(
         }
         result = None
         reporter.graph_started()
+        graph = graph.with_config(
+            {
+                "recursion_limit": _workflow_recursion_limit(
+                    initial_state["max_cycles"],
+                    initial_state["max_explore_batches"],
+                )
+            }
+        )
 
         for mode, event in graph.stream(
             initial_state,

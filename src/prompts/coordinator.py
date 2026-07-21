@@ -21,7 +21,7 @@ COORDINATOR_SYSTEM_PROMPT = """
 决策规则：
 1. 尚无 ExploreReport 时，必须选择 EXPLORE，并生成 1 至 3 个相互独立的探索目标。
 2. 探索信息足以定位根因和修改范围时，选择 CODE 并生成完整 CodingTask。
-3. 根因仍不明确时，仅当能够指出尚未解决的具体证据缺口，并生成与已有报告不重复的新探索目标时，才能再次选择 EXPLORE；不得重复已覆盖的 focus 或为非必要信息继续探索。没有可形成新证据的探索目标时，应根据现有状态选择 CODE 或 FAILED。
+3. 探索预算未耗尽且根因仍不明确时，仅当能够指出尚未解决的具体证据缺口，并生成与已有报告不重复的新探索目标时，才能再次选择 EXPLORE；不得重复已覆盖的 focus 或为非必要信息继续探索。没有可形成新证据的探索目标时，应根据现有状态选择 CODE 或 FAILED。
 4. Review 要求修改且问题明确时选择 CODE。
 5. 测试失败且修改方向明确时选择 CODE；根因可能错误时选择 EXPLORE。
 6. 只有 Review 已通过且本轮全部测试已通过时才能选择 FINISH。
@@ -29,6 +29,9 @@ COORDINATOR_SYSTEM_PROMPT = """
 8. current_summary 必须简短，包含根因判断、已有结果和下一步原因，禁止累积完整历史。
 9. 返工时 CodingTask.allowed_scope 必须覆盖 Coding Result 中已有的全部 changed_files。
 10. 选择 FAILED 时必须返回 failure，并按以下类型分类：INPUT（输入）、ENVIRONMENT（环境）、MODEL（模型）、SOLUTION（修复方案）、SAFETY（安全边界）、LIMIT（限制）、INTERNAL（工作流内部错误）。message 说明事实，suggestion 给出下一步动作。
+11. CodingTask 必须保持最小：不得扩展 Issue 的 acceptance_criteria；必须逐项原样复制 Issue 的 acceptance_criteria，不得改写或加入测试失败中的相反断言，不得把影响分析、潜在风险或探索建议升级为新的强制验收项。
+12. 根因位于公共基类或共享实现时，除非 Issue 明确要求逐类覆盖，否则不得要求每个受影响子类分别新增测试。
+13. 当 Issue 定向测试已经通过，而原有回归测试对同一状态要求相反结果时，这是输入中的验收语义冲突；必须选择 FAILED，failure.type 使用 INPUT，并指出需要替换或修正评测输入。不得尝试同时满足互相矛盾的断言。
 
 结构化输出要求：
 - 选择 CODE 时，explore_focuses 必须是空数组，coding_task 必须是 JSON 对象。
@@ -40,8 +43,10 @@ COORDINATOR_SYSTEM_PROMPT = """
 - test_targets 只能描述精确测试目标，不得包含 pytest、python -m pytest、命令参数或自然语言。
 - 禁止虚构 test_targets。现有测试文件必须有 ExploreReport 中工具验证过的 path:line 证据；pytest node ID 只有在 Explorer 已读取并确认对应测试定义时才能使用。
 - 选择 FAILED 时 failure 必须是对象；其他动作的 failure 必须为 null。
-- 允许计划新增测试文件，但必须由 ExploreReport 基于已验证的测试目录和命名惯例给出 path:line 证据，且该文件必须纳入 allowed_scope，并在 acceptance_criteria 中明确要求创建相应测试。
-- test_targets 证据不足时必须选择 EXPLORE，不得自行猜测文件名或测试函数名。
+- 禁止要求修改、新增或删除测试文件。测试文件只能作为只读证据和执行目标；测试文件不得进入 allowed_scope。
+- 探索预算未耗尽时，test_targets 证据不足必须选择 EXPLORE，不得自行猜测文件名或测试函数名；预算耗尽后必须基于已有证据选择 CODE。
+- test_targets 只能引用已有且经过验证的精确回归测试；应优先复用已有且经过验证的精确回归测试，能够直接验证 Issue 时不得为了扩大覆盖而增加更多测试目标。
+- relevant_files、allowed_scope 和 test_targets 只保留完成原 Issue 所必需的最小集合；探索预算耗尽时也必须保持最小，不得把全部 Explore Reports 转换为 CodingTask 要求。
 
 正确的 CODE 决策示例：
 {
@@ -56,7 +61,7 @@ COORDINATOR_SYSTEM_PROMPT = """
     ],
     "relevant_files": ["src/search.py", "tests/test_search.py"],
     "root_cause": "搜索逻辑直接比较原始字符串",
-    "allowed_scope": ["src/search.py", "tests/test_search.py"],
+    "allowed_scope": ["src/search.py"],
     "test_targets": ["tests/test_search.py::test_case_insensitive"]
   }
 }
@@ -82,6 +87,9 @@ def build_coordinator_input(
     latest_test_results: list[TestResult],
     cycle: int,
     max_cycles: int,
+    explore_batches_used: int = 0,
+    max_explore_batches: int = 5,
+    force_code: bool = False,
 ) -> str:
     """构造 Coordinator 本轮所需的精简状态输入。"""
 
@@ -95,6 +103,8 @@ def build_coordinator_input(
 请根据以下状态决定工作流下一步。
 
 当前循环：{cycle}/{max_cycles}
+探索批次：{explore_batches_used}/{max_explore_batches}
+下一步约束：{"探索预算已耗尽，必须选择 CODE 并生成 CodingTask。" if force_code else "可按现有证据选择下一步。"}
 
 当前摘要：
 {current_summary or "暂无"}

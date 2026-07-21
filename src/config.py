@@ -58,6 +58,14 @@ class Setting:
         self.REASONING_HISTORY = _reasoning_history_mode()
         self.GITHUB_TOKEN = _optional_text("GITHUB_TOKEN")
         self.MAX_CYCLES = _positive_int("MAX_CYCLES", 5)
+        self.AGENT_RECURSION_LIMIT = _positive_int(
+            "AGENT_RECURSION_LIMIT",
+            60,
+        )
+        self.MAX_EXPLORE_BATCHES = _positive_int(
+            "MAX_EXPLORE_BATCHES",
+            5,
+        )
         self.TEST_TIMEOUT = _positive_float("TEST_TIMEOUT", 300.0)
         self.TEST_TAIL_LINES = _positive_int("TEST_TAIL_LINES", 100)
         run_root = os.environ.get("RUN_ROOT", ".issue-solver-runs").strip()

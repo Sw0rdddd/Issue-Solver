@@ -3,6 +3,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from langgraph.errors import GraphRecursionError
 
 from nodes import coding
 from schemas.coding_result import CodingResult
@@ -79,9 +80,11 @@ class PatchAgent:
         self.result = result
         self.patches = patches
         self.calls: list[dict] = []
+        self.configs: list[dict | None] = []
 
-    def invoke(self, payload: dict) -> dict:
+    def invoke(self, payload: dict, config: dict | None = None) -> dict:
         self.calls.append(payload)
+        self.configs.append(config)
         apply_patch = {
             tool.name: tool for tool in build_coding_tools(self.context)
         }["apply_patch"]
@@ -133,6 +136,7 @@ def test_coding_node_saves_task_and_final_result_with_rsi(
     assert saved_result["index"] == 1
     assert saved_result["payload"]["success"] is True
     assert "修改 tracked.txt" in agents[0].calls[0]["messages"][0]["content"]
+    assert agents[0].configs == [{"recursion_limit": 60}]
 
 
 def test_coding_node_program_generates_error_and_rolls_back(
@@ -217,7 +221,7 @@ def test_coding_node_preserves_task_when_agent_raises(
     run_dir = git_repo.parent / "coding-agent-error-run"
 
     class FailingAgent:
-        def invoke(self, payload: dict) -> dict:
+        def invoke(self, payload: dict, config: dict | None = None) -> dict:
             raise RuntimeError("模型不可用")
 
     monkeypatch.setattr(
@@ -239,6 +243,69 @@ def test_coding_node_preserves_task_when_agent_raises(
     assert (
         run_dir / "logs" / "failure_coding_r01_s02_i00.json"
     ).is_file()
+
+
+def test_coding_node_reclassifies_unverified_environment_failure(
+    monkeypatch,
+    git_repo: Path,
+) -> None:
+    run_dir = git_repo.parent / "coding-false-environment-run"
+
+    class FailingAgent:
+        def invoke(self, payload: dict, config: dict | None = None) -> dict:
+            return {
+                "structured_response": CodingResult(
+                    success=False,
+                    changed_files=[],
+                    summary="文件不存在",
+                    diff_path=None,
+                    validation=[],
+                    remaining_risks=["无法读取文件"],
+                    failure=make_failure(
+                        "ENVIRONMENT",
+                        "read_file 返回 INPUT: 文件不存在。",
+                    ),
+                )
+            }
+
+    monkeypatch.setattr(
+        coding,
+        "build_coding_agent",
+        lambda model, context: FailingAgent(),
+    )
+
+    result = coding.build_coding_node(object())(
+        make_state(git_repo, run_dir)
+    )
+
+    assert result["status"] == "FAILED"
+    assert result["failure"].type == "MODEL"
+    assert "误报为环境故障" in result["failure"].message
+    assert git_output(git_repo, "status", "--porcelain") == ""
+
+
+def test_coding_node_classifies_recursion_limit(
+    monkeypatch,
+    git_repo: Path,
+) -> None:
+    run_dir = git_repo.parent / "coding-recursion-limit-run"
+
+    class FailingAgent:
+        def invoke(self, payload: dict, config: dict | None = None) -> dict:
+            raise GraphRecursionError("Recursion limit of 60 reached")
+
+    monkeypatch.setattr(
+        coding,
+        "build_coding_agent",
+        lambda model, context: FailingAgent(),
+    )
+
+    result = coding.build_coding_node(object())(
+        make_state(git_repo, run_dir)
+    )
+
+    assert result["failure"].type == "LIMIT"
+    assert "Coding Agent 达到最大执行步数 60" in result["failure"].message
 
 
 def test_coding_node_stops_after_tenth_failed_patch(

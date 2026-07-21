@@ -9,7 +9,7 @@ from typing import Any, TextIO
 
 from schemas.environment_info import EnvironmentInfo
 from schemas.failure import FailureInfo, make_failure
-from services.report import ReportResult
+from services.report import ReportResult, append_run_result
 
 
 MAX_TERMINAL_WIDTH = 120
@@ -112,6 +112,9 @@ class TerminalReporter:
         self.test_results: list[Any] = []
         self.worktree_status: str | None = None
         self.report_path: str | None = None
+        self.diff_path: str | None = None
+        self.report_generation: str | None = None
+        self.failure: FailureInfo | None = None
 
         self.visible_round = 0
         self.explore_total = 0
@@ -446,6 +449,9 @@ class TerminalReporter:
     def report_completed(self, result: ReportResult) -> None:
         elapsed = self._duration("report")
         self.report_path = result.path
+        self.report_generation = (
+            "程序模板" if result.fallback_used else "模型"
+        )
         if result.path is None:
             self._progress(f"✗ Report 保存失败 · {elapsed:.2f} 秒")
             failure = result.failure or make_failure(
@@ -516,8 +522,46 @@ class TerminalReporter:
         )
         self.run_dir = str(state.get("run_dir", self.run_dir or "")) or None
         self.worktree_status = worktree_status
+        self.diff_path = state.get("diff_path", self.diff_path)
+        if state.get("failure") is not None:
+            self.failure = FailureInfo.model_validate(state["failure"])
 
     def summary(self, *, total_tokens: int, total_duration: float) -> None:
+        passed = sum(item.status == "PASSED" for item in self.test_results)
+        test_summary = (
+            f"{passed}/{len(self.test_results)} PASSED"
+            if self.test_results
+            else "未执行"
+        )
+        if self.report_path and Path(self.report_path).is_file():
+            try:
+                append_run_result(
+                    self.report_path,
+                    {
+                        "status": self.status,
+                        "model": self.model_name,
+                        "run_id": self.run_id,
+                        "repair_round": self.repair_round,
+                        "phase": self.phase,
+                        "next_action": self.next_action,
+                        "changed_files": self.changed_files,
+                        "test_summary": test_summary,
+                        "worktree_status": self.worktree_status,
+                        "total_tokens": total_tokens,
+                        "total_duration": total_duration,
+                        "report_generation": self.report_generation,
+                        "failure": (
+                            self.failure.model_dump(mode="json")
+                            if self.failure is not None
+                            else None
+                        ),
+                        "run_dir": self.run_dir,
+                        "diff_path": self.diff_path,
+                    },
+                )
+            except Exception as exc:
+                self._write(f"! Report 运行结果写入失败：{exc}", error=True)
+
         self._write()
         self._write(self._rule("运行摘要"))
         self._summary_item("状态", self.status)
@@ -533,10 +577,9 @@ class TerminalReporter:
         if self.changed_files:
             self._summary_item("修改文件", len(self.changed_files))
         if self.test_results:
-            passed = sum(item.status == "PASSED" for item in self.test_results)
             self._summary_item(
                 "测试结果",
-                f"{passed}/{len(self.test_results)} PASSED",
+                test_summary,
             )
         if self.worktree_status:
             self._summary_item("工作区", self.worktree_status)
