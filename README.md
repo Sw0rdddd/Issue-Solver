@@ -1,6 +1,6 @@
 # Issue Solver
 
-[![Tests](https://github.com/Sw0rdddd/Issue-Solver/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Sw0rdddd/Issue-Solver/actions/workflows/ci.yml)
+[![Tests](https://github.com/Sw0rdddd/Issue-Solver/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/Sw0rdddd/Issue-Solver/actions/workflows/ci.yml)
 ![Coverage ≥80%](https://img.shields.io/badge/coverage-%E2%89%A580%25-brightgreen)
 ![Python 3.13](https://img.shields.io/badge/python-3.13-3776AB?logo=python&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
@@ -9,9 +9,11 @@
 
 > **当前定位：** 面向 Windows 开发环境，当前仅支持 Python + pytest，推荐用于中小型 Git 仓库。
 
-[测评结果](#测评结果) · [工程亮点](#工程亮点) · [架构概览](#架构概览) · [快速开始](#快速开始) · [项目文档](#文档)
+> **技术栈：** Python 3.13 · LangChain · LangGraph · Pydantic · pytest · Git · uv
 
-以下为使用 `gpt-5.4-nano` 处理示例 Issue 的效果展示。
+[测评结果](#测评结果) · [工程亮点](#工程亮点) · [架构概览](#架构概览) · [完整示例](example/README.md) · [快速开始](#快速开始) · [项目文档](#文档)
+
+以下为使用 `gpt-5.4-nano` 处理示例 Issue 的效果展示；可按[完整示例](example/README.md)在本地复现。
 
 <p align="center">
   <img src="assets/workflow.gif" width="1200" alt="Issue Solver 运行演示">
@@ -33,7 +35,6 @@
       <th nowrap align="right">测试通过率</th>
       <th nowrap align="right">平均耗时</th>
       <th nowrap align="right">平均轮次</th>
-      <th nowrap align="right">平均 Token</th>
     </tr>
   </thead>
   <tbody>
@@ -47,7 +48,6 @@
       <td nowrap align="right">86.67%</td>
       <td nowrap align="right">411.67 秒</td>
       <td nowrap align="right">1.33</td>
-      <td nowrap align="right">1,576,349</td>
     </tr>
   </tbody>
 </table>
