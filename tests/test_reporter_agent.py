@@ -24,5 +24,7 @@ def test_report_system_prompt_contains_the_only_output_template() -> None:
     assert "唯一输出模板" in REPORT_SYSTEM_PROMPT
     assert "禁止增加、删除、重命名或重排字段与章节" in REPORT_SYSTEM_PROMPT
     assert "# Issue 修复报告" in REPORT_SYSTEM_PROMPT
-    assert "- 修复轮次：" in REPORT_SYSTEM_PROMPT
-    assert "- 报告生成：模型" in REPORT_SYSTEM_PROMPT
+    assert "- 修改总结：" in REPORT_SYSTEM_PROMPT
+    assert "- 验证总结：" in REPORT_SYSTEM_PROMPT
+    assert "状态、Token、耗时和产物地址由程序" in REPORT_SYSTEM_PROMPT
+    assert "- 修复轮次：" not in REPORT_SYSTEM_PROMPT

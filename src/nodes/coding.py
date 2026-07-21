@@ -1,8 +1,10 @@
+import subprocess
 from pathlib import Path
 
 from langchain_core.language_models import BaseChatModel
 
 from agents.coder import build_coding_agent
+from config import Setting
 from graph.state import ResolverState
 from prompts.coder import build_coding_input
 from schemas.coding_result import CodingResult
@@ -14,6 +16,7 @@ from schemas.failure import (
     make_failure,
 )
 from schemas.issue_specification import IssueSpec
+from services.agent_execution import invoke_tool_agent
 from services.artifacts import write_stage_artifact
 from tools.coding import (
     CodingToolContext,
@@ -30,6 +33,45 @@ def _agent_report(result: CodingResult | None) -> dict | None:
         "summary": result.summary,
         "remaining_risks": result.remaining_risks,
     }
+
+
+def _probe_coding_environment(
+    context: CodingToolContext,
+    coding_task: CodingTask,
+) -> FailureInfo | None:
+    """复核 Agent 声称的环境故障是否能由程序重现。"""
+
+    try:
+        if not context.repo_root.is_dir():
+            raise OSError("目标仓库目录不存在。")
+        list(context.repo_root.iterdir())
+
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=context.repo_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise OSError(result.stderr.strip() or "无法读取 Git HEAD。")
+        if result.stdout.strip() != context.base_commit:
+            raise OSError("目标仓库 HEAD 已变化。")
+
+        for relative in coding_task.relevant_files:
+            target = context.repo_root / relative
+            if target.is_file():
+                with target.open("rb") as stream:
+                    stream.read(1)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return make_failure(
+            "ENVIRONMENT",
+            f"程序复核 Coding 环境失败：{exc}",
+        )
+    return None
 
 
 def build_coding_node(model: BaseChatModel):
@@ -103,7 +145,8 @@ def build_coding_node(model: BaseChatModel):
                 current_summary=state.get("current_summary", ""),
             )
             try:
-                response = agent.invoke(
+                response = invoke_tool_agent(
+                    agent,
                     {
                         "messages": [
                             {
@@ -111,7 +154,12 @@ def build_coding_node(model: BaseChatModel):
                                 "content": user_message,
                             }
                         ]
-                    }
+                    },
+                    agent_name="Coding Agent",
+                    recursion_limit=state.get(
+                        "agent_recursion_limit",
+                        Setting().AGENT_RECURSION_LIMIT,
+                    ),
                 )
             except Exception as exc:
                 raise ClassifiedFailure(
@@ -137,7 +185,29 @@ def build_coding_node(model: BaseChatModel):
 
             iteration = get_coding_iteration_count(context)
             if not coding_result.success:
-                raise ClassifiedFailure(coding_result.failure)
+                agent_failure = coding_result.failure
+                if agent_failure is None:
+                    raise ClassifiedFailure(
+                        make_failure(
+                            "MODEL",
+                            "Coding Agent 返回失败但未提供 failure。",
+                        )
+                    )
+                if agent_failure.type == "ENVIRONMENT":
+                    verified_failure = _probe_coding_environment(
+                        context,
+                        coding_task,
+                    )
+                    if verified_failure is not None:
+                        raise ClassifiedFailure(verified_failure)
+                    raise ClassifiedFailure(
+                        make_failure(
+                            "MODEL",
+                            "Coding Agent 将无法复现的工具调用问题误报为环境故障。",
+                            "检查 Agent 的仓库相对路径参数和工具调用记录后重试。",
+                        )
+                    )
+                raise ClassifiedFailure(agent_failure)
             if coding_result.diff_path is not None:
                 raise ClassifiedFailure(
                     make_failure(

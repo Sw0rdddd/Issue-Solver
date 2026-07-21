@@ -8,22 +8,15 @@ from schemas.failure import make_failure
 from schemas.issue_specification import IssueSpec
 from schemas.review_result import ReviewResult
 from schemas.test_result import TestResult as SolverTestResult
-from services.report import build_report_context, create_run_report
+from services.report import (
+    append_run_result,
+    build_report_context,
+    create_run_report,
+)
 
 
 def valid_report_markdown() -> str:
     return """# Issue 修复报告
-
-## 运行结果
-- 状态：FINISHED
-- 运行 ID：run_test
-- 模型：deepseek-reasoner
-- 结束阶段：FINALIZE
-- 修复轮次：1
-- 工作区：保留修改
-- 失败类型：无
-- 失败原因：无
-- 处理建议：无
 
 ## 问题与根因
 - Issue：搜索忽略大小写
@@ -31,21 +24,13 @@ def valid_report_markdown() -> str:
 - 关键证据：
   - src/search.py:8 直接比较原始字符串
 
-## 修改内容
-- 编码摘要：统一查询和标题的大小写
-- 修改文件：
-  - src/search.py
+## 修改与验证
+- 修改总结：统一查询和标题的大小写
+- 验证总结：Review 和测试均通过
 
-## 验证结果
-- Review：APPROVE
-- 测试：
-  - `pytest -q tests/test_search.py`：PASSED，退出码 0，0.25 秒
-
-## 风险与交付物
+## 风险
 - 剩余风险：
-  - 未获得
-- 最终 Patch：E:/runs/run_test/diff.patch
-- 报告生成：模型"""
+  - 未获得"""
 
 
 def make_state() -> dict:
@@ -116,17 +101,27 @@ def test_report_context_excludes_full_test_logs_and_resolved_command() -> None:
 
     assert context["tests"] == [
         {
-            "command": "pytest -q tests/test_search.py",
             "status": "PASSED",
-            "exit_code": 0,
-            "duration": 0.25,
         }
     ]
+    assert context["run"] == {
+        "status": "FINISHED",
+        "phase": "FINALIZE",
+        "failure": None,
+    }
+    assert context["coding"]["result"] == {
+        "success": True,
+        "summary": "统一查询和标题的大小写",
+        "remaining_risks": [],
+    }
     assert "src/search.py:8" in context["explore_reports"][0]["root_cause"]
     rendered = str(context)
     assert "output_tail" not in rendered
     assert "stdout_path" not in rendered
     assert "resolved_command" not in rendered
+    assert "run_test" not in rendered
+    assert "deepseek-reasoner" not in rendered
+    assert "diff.patch" not in rendered
 
 
 def test_create_run_report_writes_model_markdown(tmp_path: Path) -> None:
@@ -152,7 +147,9 @@ def test_create_run_report_writes_model_markdown(tmp_path: Path) -> None:
     assert len(captured) == 1
     messages = captured[0]
     assert "不能修改任何文件" in messages[0].content
-    assert "pytest -q tests/test_search.py" in messages[1].content
+    assert "状态、Token、耗时和产物地址由程序" in messages[0].content
+    assert '"status": "PASSED"' in messages[1].content
+    assert "pytest -q tests/test_search.py" not in messages[1].content
     assert "output_tail" not in messages[1].content
 
 
@@ -173,7 +170,7 @@ def test_create_run_report_falls_back_when_agent_fails(tmp_path: Path) -> None:
     assert result.failure.type == "MODEL"
     assert result.failure.message == "模型不可用"
     assert "## 问题与根因" in report
-    assert "报告生成：程序模板（模型不可用）" in report
+    assert "## 运行结果" not in report
     assert "src/search.py:8 未统一大小写" in report
 
 
@@ -191,7 +188,7 @@ def test_create_run_report_falls_back_when_agent_returns_empty_text(
     report = (tmp_path / "report.md").read_text(encoding="utf-8")
     assert result.fallback_used is True
     assert result.failure.message == "Reporter 返回了空文本。"
-    assert "## 验证结果" in report
+    assert "## 修改与验证" in report
 
 
 def test_create_run_report_falls_back_when_agent_changes_template(
@@ -211,7 +208,7 @@ def test_create_run_report_falls_back_when_agent_changes_template(
     assert result.fallback_used is True
     assert result.failure.message == "Reporter 未使用固定报告标题。"
     assert report.startswith("# Issue 修复报告\n")
-    assert "- 报告生成：程序模板" in report
+    assert "## 风险" in report
 
 
 def test_create_run_report_without_model_uses_fallback(tmp_path: Path) -> None:
@@ -234,9 +231,52 @@ def test_create_run_report_without_model_uses_fallback(tmp_path: Path) -> None:
     report = (tmp_path / "report.md").read_text(encoding="utf-8")
     assert result.fallback_used is True
     assert result.failure is None
-    assert "状态：FAILED" in report
-    assert "工作区：未修改" in report
-    assert "未发现虚拟环境" in report
+    assert "Issue：修复环境" in report
+    assert "## 运行结果" not in report
+
+
+def test_append_run_result_adds_deterministic_terminal_summary(
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "report.md"
+    report_path.write_text(valid_report_markdown() + "\n", encoding="utf-8")
+
+    append_run_result(
+        report_path,
+        {
+            "status": "失败",
+            "model": "deepseek-reasoner",
+            "run_id": "run_test",
+            "repair_round": 1,
+            "phase": "FINALIZE",
+            "next_action": "FINISH",
+            "changed_files": ["src/search.py"],
+            "test_summary": "1/1 PASSED",
+            "worktree_status": "保留修改",
+            "total_tokens": 12345,
+            "total_duration": 48.09,
+            "report_generation": "模型",
+            "failure": {
+                "type": "SOLUTION",
+                "message": "修复未完成",
+                "suggestion": "检查修改后重试。",
+            },
+            "run_dir": str(tmp_path),
+            "diff_path": str(tmp_path / "diff.patch"),
+        },
+    )
+
+    report = report_path.read_text(encoding="utf-8")
+    assert report.index("## 运行结果") > report.index("## 风险")
+    assert "- 总 Token：12,345" in report
+    assert "- 最终耗时：48.09 秒" in report
+    assert "- 失败类型：SOLUTION" in report
+    assert "- 失败原因：修复未完成" in report
+    assert "- 处理建议：检查修改后重试。" in report
+    assert f"  - 运行目录：{tmp_path}" in report
+    assert f"  - 日志目录：{tmp_path / 'logs'}" in report
+    assert f"  - 报告：{report_path}" in report
+    assert f"  - 最终 Patch：{tmp_path / 'diff.patch'}" in report
 
 
 def test_create_run_report_never_overwrites_existing_report(tmp_path: Path) -> None:

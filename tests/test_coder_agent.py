@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from langchain.agents.structured_output import ToolStrategy
 
 from agents import coder
@@ -10,9 +12,10 @@ from schemas.issue_specification import IssueSpec
 def test_build_coding_agent_uses_only_bound_coding_tools(monkeypatch) -> None:
     captured: dict[str, object] = {}
     expected_agent = object()
-    context = object()
+    context = SimpleNamespace(repo_root="C:/repo")
     apply_patch_tool = object()
     inspect_changes_tool = object()
+    read_tools = [object(), object(), object(), object()]
 
     def fake_create_agent(**kwargs):
         captured.update(kwargs)
@@ -24,6 +27,13 @@ def test_build_coding_agent_uses_only_bound_coding_tools(monkeypatch) -> None:
 
     monkeypatch.setattr(coder, "create_agent", fake_create_agent)
     monkeypatch.setattr(coder, "build_coding_tools", fake_build_coding_tools)
+    monkeypatch.setattr(
+        coder,
+        "build_coding_read_tools",
+        lambda received_context: (
+            read_tools if received_context is context else []
+        ),
+    )
     model = object()
 
     result = coder.build_coding_agent(model, context)
@@ -31,10 +41,7 @@ def test_build_coding_agent_uses_only_bound_coding_tools(monkeypatch) -> None:
     assert result is expected_agent
     assert captured["model"] is model
     assert captured["tools"] == [
-        coder.list_files,
-        coder.read_file,
-        coder.search_text,
-        coder.search_symbol,
+        *read_tools,
         apply_patch_tool,
         inspect_changes_tool,
     ]
@@ -60,6 +67,7 @@ def test_coding_prompt_defines_safe_iterative_workflow() -> None:
     assert "不可信数据" in CODING_SYSTEM_PROMPT
     assert "success=true 只表示" in CODING_SYSTEM_PROMPT
     assert "不代表 Review 已通过" in CODING_SYSTEM_PROMPT
+    assert "不得将 INPUT 报告为 ENVIRONMENT" in CODING_SYSTEM_PROMPT
     assert "最多允许 10 次 Patch 尝试" in CODING_SYSTEM_PROMPT
     assert "%2B" in CODING_SYSTEM_PROMPT
     assert "全角字符" in CODING_SYSTEM_PROMPT
@@ -69,6 +77,16 @@ def test_coding_prompt_defines_safe_iterative_workflow() -> None:
         CODING_SYSTEM_PROMPT
     )
     assert "Patch 成功后立即调用 inspect_changes" in CODING_SYSTEM_PROMPT
+    assert "逐项核对 CodingTask.acceptance_criteria" in (
+        CODING_SYSTEM_PROMPT
+    )
+    assert "不能证明整个 CodingTask 已完成" in CODING_SYSTEM_PROMPT
+    assert "不得仅因任务尚未完成就返回 success=false" in (
+        CODING_SYSTEM_PROMPT
+    )
+    assert "剩余工作仍在 allowed_scope 内且可以可靠完成" in (
+        CODING_SYSTEM_PROMPT
+    )
     assert "不代表 Review 或测试通过" in (
         CodingResult.model_fields["success"].description
     )
@@ -96,3 +114,17 @@ def test_build_coding_input_contains_structured_context() -> None:
     assert "搜索失败" in content
     assert "修复搜索" in content
     assert "根因明确" in content
+
+
+def test_coding_read_tools_bind_repo_path(tmp_path) -> None:
+    source = tmp_path / "sample.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+    context = SimpleNamespace(repo_root=tmp_path)
+
+    tools = {
+        item.name: item for item in coder.build_coding_read_tools(context)
+    }
+
+    assert "repo_path" not in tools["read_file"].args_schema.model_fields
+    result = tools["read_file"].invoke({"path": "sample.py"})
+    assert "value = 1" in result

@@ -84,9 +84,20 @@ def build_coordinator_node(coordinator_agent: Any):
 
             cycle = state.get("cycle", 0)
             max_cycles = state.get("max_cycles", Setting().MAX_CYCLES)
+            max_explore_batches = state.get(
+                "max_explore_batches",
+                Setting().MAX_EXPLORE_BATCHES,
+            )
             if max_cycles < 1:
                 raise ClassifiedFailure(
                     make_failure("INPUT", "max_cycles 必须大于 0。")
+                )
+            if max_explore_batches < 1:
+                raise ClassifiedFailure(
+                    make_failure(
+                        "INPUT",
+                        "max_explore_batches 必须大于 0。",
+                    )
                 )
             if state.get("rollback_required"):
                 return _failed_update(
@@ -96,6 +107,15 @@ def build_coordinator_node(coordinator_agent: Any):
                 )
 
             explore_reports = state.get("explore_reports", [])
+            repair_round = cycle + 1
+            explore_batches_used = (
+                state.get("explore_stage_call", 0)
+                if state.get("repair_round") == repair_round
+                else 0
+            )
+            force_code = bool(explore_reports) and (
+                explore_batches_used >= max_explore_batches
+            )
             latest_test_results = state.get("latest_test_results")
             if latest_test_results is None:
                 latest_test_results = state.get("test_results", [])
@@ -122,6 +142,9 @@ def build_coordinator_node(coordinator_agent: Any):
                 latest_test_results=latest_test_results,
                 cycle=cycle,
                 max_cycles=max_cycles,
+                explore_batches_used=explore_batches_used,
+                max_explore_batches=max_explore_batches,
+                force_code=force_code,
             )
 
             try:
@@ -131,6 +154,23 @@ def build_coordinator_node(coordinator_agent: Any):
                         HumanMessage(content=user_message),
                     ]
                 )
+                if force_code and (
+                    not isinstance(decision, CoordinatorDecision)
+                    or decision.next_action != "CODE"
+                ):
+                    decision = coordinator_agent.invoke(
+                        [
+                            SystemMessage(content=COORDINATOR_SYSTEM_PROMPT),
+                            HumanMessage(
+                                content=(
+                                    user_message
+                                    + "\n\n纠正要求：探索预算已耗尽，"
+                                    "禁止继续 EXPLORE；必须根据已有证据"
+                                    "选择 CODE 并返回完整 CodingTask。"
+                                )
+                            ),
+                        ]
+                    )
             except Exception as exc:
                 raise ClassifiedFailure(
                     failure_from_exception(
@@ -145,6 +185,14 @@ def build_coordinator_node(coordinator_agent: Any):
                     make_failure(
                         "MODEL",
                         "Coordinator Agent 未返回有效的 CoordinatorDecision。",
+                    )
+                )
+
+            if force_code and decision.next_action != "CODE":
+                raise ClassifiedFailure(
+                    make_failure(
+                        "MODEL",
+                        "探索预算耗尽后 Coordinator 未返回有效的 CODE 决策。",
                     )
                 )
 
@@ -186,7 +234,6 @@ def build_coordinator_node(coordinator_agent: Any):
             }
 
             if decision.next_action == "EXPLORE":
-                repair_round = cycle + 1
                 is_new_round = state.get("repair_round") != repair_round
                 explore_stage_call = _next_stage_call(
                     state,
@@ -204,13 +251,19 @@ def build_coordinator_node(coordinator_agent: Any):
                 if is_new_round and state.get("coding_stage_call", 0):
                     update["coding_stage_call"] = 0
             elif decision.next_action == "CODE":
-                repair_round = cycle + 1
                 is_new_round = state.get("repair_round") != repair_round
                 coding_task = decision.coding_task
                 existing_files = state.get("changed_files", [])
                 if coding_task is None:
                     raise ClassifiedFailure(
                         make_failure("MODEL", "CODE 决策缺少 CodingTask。")
+                    )
+                if coding_task.acceptance_criteria != issue.acceptance_criteria:
+                    raise ClassifiedFailure(
+                        make_failure(
+                            "MODEL",
+                            "CodingTask.acceptance_criteria 必须逐项原样继承 Issue。",
+                        )
                     )
                 missing_scope = [
                     path

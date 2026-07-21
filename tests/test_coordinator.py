@@ -91,7 +91,7 @@ def make_coding_task() -> CodingTask:
         acceptance_criteria=["空结果返回空列表"],
         relevant_files=["app.py"],
         root_cause="返回值可能为 None",
-        allowed_scope=["app.py", "tests/test_app.py"],
+        allowed_scope=["app.py"],
         test_targets=["tests/test_app.py"],
     )
 
@@ -143,8 +143,33 @@ def test_coordinator_prompt_requires_bounded_evidence_based_decisions() -> None:
     assert "与已有报告不重复" in COORDINATOR_SYSTEM_PROMPT
     assert "不限制累计 Explore 次数" not in COORDINATOR_SYSTEM_PROMPT
     assert "禁止虚构 test_targets" in COORDINATOR_SYSTEM_PROMPT
-    assert "计划新增测试文件" in COORDINATOR_SYSTEM_PROMPT
-    assert "test_targets 证据不足时必须选择 EXPLORE" in (
+    assert "计划新增测试文件" not in COORDINATOR_SYSTEM_PROMPT
+    assert "禁止要求修改、新增或删除测试文件" in (
+        COORDINATOR_SYSTEM_PROMPT
+    )
+    assert "测试文件不得进入 allowed_scope" in COORDINATOR_SYSTEM_PROMPT
+    assert "test_targets 只能引用已有" in COORDINATOR_SYSTEM_PROMPT
+    assert "test_targets 证据不足必须选择 EXPLORE" in (
+        COORDINATOR_SYSTEM_PROMPT
+    )
+    assert "预算耗尽后必须基于已有证据选择 CODE" in (
+        COORDINATOR_SYSTEM_PROMPT
+    )
+    assert "不得扩展 Issue 的 acceptance_criteria" in (
+        COORDINATOR_SYSTEM_PROMPT
+    )
+    assert "逐项原样复制 Issue 的 acceptance_criteria" in (
+        COORDINATOR_SYSTEM_PROMPT
+    )
+    assert "互相矛盾的断言" in COORDINATOR_SYSTEM_PROMPT
+    assert "公共基类" in COORDINATOR_SYSTEM_PROMPT
+    assert "不得要求每个受影响子类分别新增测试" in (
+        COORDINATOR_SYSTEM_PROMPT
+    )
+    assert "优先复用已有且经过验证的精确回归测试" in (
+        COORDINATOR_SYSTEM_PROMPT
+    )
+    assert "探索预算耗尽时也必须保持最小" in (
         COORDINATOR_SYSTEM_PROMPT
     )
 
@@ -281,6 +306,79 @@ def test_coordinator_node_builds_coding_task_after_explore() -> None:
     }
 
 
+def test_coordinator_rejects_expanded_acceptance_criteria() -> None:
+    task = make_coding_task().model_copy(
+        update={
+            "acceptance_criteria": [
+                "空结果返回空列表",
+                "旧测试要求返回 500",
+            ]
+        }
+    )
+    agent = FakeCoordinatorAgent(
+        result=CoordinatorDecision(
+            next_action="CODE",
+            current_summary="错误地合并相反断言",
+            coding_task=task,
+        )
+    )
+
+    result = build_coordinator_node(agent)(
+        {
+            "issue": make_issue(),
+            "cycle": 0,
+            "explore_reports": [make_report()],
+        }
+    )
+
+    assert result["status"] == "FAILED"
+    assert result["failure"].type == "MODEL"
+    assert "逐项原样继承" in result["failure"].message
+
+
+def test_coordinator_forces_code_after_explore_budget_is_used() -> None:
+    decisions = iter(
+        [
+            CoordinatorDecision(
+                next_action="EXPLORE",
+                current_summary="仍想继续探索",
+                explore_focuses=["重复确认根因"],
+            ),
+            CoordinatorDecision(
+                next_action="CODE",
+                current_summary="探索预算已用完，进入编码",
+                coding_task=make_coding_task(),
+            ),
+        ]
+    )
+
+    class SequenceAgent:
+        def __init__(self) -> None:
+            self.calls: list[list[object]] = []
+
+        def invoke(self, messages: list[object]) -> CoordinatorDecision:
+            self.calls.append(messages)
+            return next(decisions)
+
+    agent = SequenceAgent()
+    result = build_coordinator_node(agent)(
+        {
+            "issue": make_issue(),
+            "cycle": 0,
+            "repair_round": 1,
+            "explore_reports": [make_report()],
+            "explore_stage_call": 5,
+            "max_explore_batches": 5,
+        }
+    )
+
+    assert result["next_action"] == "CODE"
+    assert result["coding_task"] == make_coding_task()
+    assert len(agent.calls) == 2
+    assert "探索批次：5/5" in agent.calls[0][1].content
+    assert "禁止继续 EXPLORE" in agent.calls[1][1].content
+
+
 def test_coordinator_keeps_stage_calls_independent() -> None:
     agent = FakeCoordinatorAgent(
         result=CoordinatorDecision(
@@ -323,8 +421,9 @@ def test_coordinator_resets_other_stage_counter_in_new_round() -> None:
             "cycle": 1,
             "explore_reports": [make_report()],
             "repair_round": 1,
-            "explore_stage_call": 3,
+            "explore_stage_call": 5,
             "coding_stage_call": 4,
+            "max_explore_batches": 5,
         }
     )
 

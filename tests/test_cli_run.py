@@ -25,6 +25,7 @@ def prepare_runtime(
     repo_root.mkdir()
 
     compiled_graph = Mock()
+    compiled_graph.with_config.return_value = compiled_graph
     graph_builder = Mock()
     graph_builder.compile.return_value = compiled_graph
     model_constructor = Mock(return_value=object())
@@ -168,6 +169,10 @@ def summary_value(rendered: str, label: str) -> str:
 
 def test_controller_root_matches_repository_root() -> None:
     assert run_module.CONTROLLER_ROOT == Path(__file__).parents[1]
+
+
+def test_workflow_recursion_limit_covers_configured_rounds() -> None:
+    assert run_module._workflow_recursion_limit(5, 5) == 75
 
 
 def test_run_rejects_missing_repository(
@@ -365,6 +370,8 @@ def test_run_streams_graph_with_initial_state_and_progress(
         "run_dir": str(run_dir),
         "issue_input": "修复查询失败",
         "max_cycles": 5,
+        "agent_recursion_limit": setting.AGENT_RECURSION_LIMIT,
+        "max_explore_batches": setting.MAX_EXPLORE_BATCHES,
         "test_timeout": setting.TEST_TIMEOUT,
         "test_tail_lines": setting.TEST_TAIL_LINES,
         "environment": EnvironmentInfo(
@@ -384,6 +391,9 @@ def test_run_streams_graph_with_initial_state_and_progress(
     assert model_constructor.call_args.kwargs["model"] == "test-model"
     assert model_constructor.call_args.kwargs["reasoning_history_mode"] == (
         setting.REASONING_HISTORY
+    )
+    compiled_graph.with_config.assert_called_once_with(
+        {"recursion_limit": 75}
     )
     compiled_graph.invoke.assert_not_called()
 
@@ -409,6 +419,11 @@ def test_run_streams_graph_with_initial_state_and_progress(
     assert summary_value(output, "报告") == str(run_dir / "report.md")
     assert "150" in output
     assert "最终耗时" in output
+    report = (run_dir / "report.md").read_text(encoding="utf-8")
+    assert "## 运行结果" in report
+    assert "- 总 Token：150" in report
+    assert f"  - 运行目录：{run_dir}" in report
+    assert f"  - 报告：{run_dir / 'report.md'}" in report
 
 
 def test_quiet_hides_progress_but_keeps_summary(

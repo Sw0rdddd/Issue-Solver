@@ -467,6 +467,8 @@ def test_resolver_state_required_and_optional_keys() -> None:
             "test_results",
             "latest_test_results",
             "max_cycles",
+            "agent_recursion_limit",
+            "max_explore_batches",
             "test_timeout",
             "test_tail_lines",
             "rollback_required",

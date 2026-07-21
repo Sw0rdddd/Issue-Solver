@@ -50,6 +50,8 @@ class ResolverState(TypedDict):
 
     # 运行级配置，未提供时由节点使用默认值
     max_cycles: NotRequired[int]
+    agent_recursion_limit: NotRequired[int]
+    max_explore_batches: NotRequired[int]
     test_timeout: NotRequired[float]
     test_tail_lines: NotRequired[int]
 

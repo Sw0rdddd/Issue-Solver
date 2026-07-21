@@ -54,9 +54,19 @@ def _filtered_test_result(value: Any) -> dict[str, Any] | None:
     result = _model_value(value)
     if result is None:
         return None
+    filtered = {key: result.get(key) for key in ("status", "failure")}
+    if filtered["failure"] is None:
+        filtered.pop("failure")
+    return filtered
+
+
+def _filtered_coding_result(value: Any) -> dict[str, Any] | None:
+    result = _model_value(value)
+    if result is None:
+        return None
     filtered = {
         key: result.get(key)
-        for key in ("command", "status", "exit_code", "duration", "failure")
+        for key in ("success", "summary", "remaining_risks", "failure")
     }
     if filtered["failure"] is None:
         filtered.pop("failure")
@@ -80,7 +90,7 @@ def build_report_context(
         for report in (state.get("explore_reports") or [])
         if (filtered := _filtered_explore_report(report)) is not None
     ]
-    coding_result = _model_value(state.get("coding_result"))
+    coding_result = _filtered_coding_result(state.get("coding_result"))
     review_result = _model_value(state.get("review_result"))
     test_values = state.get("latest_test_results")
     if test_values is None:
@@ -93,33 +103,18 @@ def build_report_context(
 
     return {
         "run": {
-            "run_id": state.get("run_id"),
-            "model": model_name or "未配置",
             "status": state.get("status", "FAILED"),
             "phase": state.get("phase", "INITIALIZE"),
-            "repair_round": state.get(
-                "repair_round",
-                state.get("cycle", 0),
-            ),
-            "repo_path": state.get("repo_path"),
-            "base_commit": state.get("base_commit"),
-            "next_action": state.get("next_action"),
             "failure": _model_value(state.get("failure")),
-            "worktree_status": worktree_status or "未知",
         },
         "issue": issue,
         "coordinator_summary": state.get("current_summary"),
         "explore_reports": explore_reports,
         "coding": {
             "result": coding_result,
-            "changed_files": list(state.get("changed_files") or []),
         },
         "review": review_result,
         "tests": test_results,
-        "delivery": {
-            "diff_path": state.get("diff_path"),
-            "rollback_required": state.get("rollback_required", False),
-        },
     }
 
 
@@ -143,20 +138,14 @@ def _validate_report_format(content: str) -> None:
 
 def build_fallback_report(
     context: Mapping[str, Any],
-    *,
-    generation_error: str | None = None,
 ) -> str:
     """使用固定模板生成不依赖模型的 Markdown 报告。"""
 
-    run = context["run"]
-    failure = run.get("failure") or {}
     issue = context["issue"]
     coding = context["coding"]
     coding_result = coding.get("result") or {}
     review = context.get("review") or {}
     tests = context.get("tests") or []
-    delivery = context["delivery"]
-
     issue_title = issue.get("title") or issue.get("raw_input") or "未获得"
     root_causes = [
         report.get("root_cause")
@@ -172,29 +161,18 @@ def build_fallback_report(
         *(coding_result.get("remaining_risks") or []),
         *(review.get("remaining_risks") or []),
     ]
-    test_lines = [
-        (
-            f"  - `{result.get('command') or '未知命令'}`："
-            f"{result.get('status') or 'UNKNOWN'}，"
-            f"退出码 {result.get('exit_code', '未知')}，"
-            f"{float(result.get('duration') or 0):.2f} 秒"
-        )
-        for result in tests
-    ] or ["  - 未执行"]
+    review_status = review.get("verdict") or "未执行"
+    test_statuses = [result.get("status") or "UNKNOWN" for result in tests]
+    validation_summary = f"Review：{review_status}；测试："
+    validation_summary += (
+        f"{sum(status == 'PASSED' for status in test_statuses)}/"
+        f"{len(test_statuses)} PASSED"
+        if test_statuses
+        else "未执行"
+    )
 
     lines = [
         "# Issue 修复报告",
-        "",
-        "## 运行结果",
-        f"- 状态：{run.get('status') or 'FAILED'}",
-        f"- 运行 ID：{run.get('run_id') or '未获得'}",
-        f"- 模型：{run.get('model') or '未配置'}",
-        f"- 结束阶段：{run.get('phase') or '未知'}",
-        f"- 修复轮次：{run.get('repair_round', 0)}",
-        f"- 工作区：{run.get('worktree_status') or '未知'}",
-        f"- 失败类型：{failure.get('type') or '无'}",
-        f"- 失败原因：{failure.get('message') or '无'}",
-        f"- 处理建议：{failure.get('suggestion') or '无'}",
         "",
         "## 问题与根因",
         f"- Issue：{issue_title}",
@@ -202,26 +180,60 @@ def build_fallback_report(
         "- 关键证据：",
         *_bullet_lines(findings),
         "",
-        "## 修改内容",
-        f"- 编码摘要：{coding_result.get('summary') or '未获得'}",
-        "- 修改文件：",
-        *_bullet_lines(coding.get("changed_files") or []),
+        "## 修改与验证",
+        f"- 修改总结：{coding_result.get('summary') or '未获得'}",
+        f"- 验证总结：{validation_summary}",
         "",
-        "## 验证结果",
-        f"- Review：{review.get('verdict') or '未执行'}",
-        "- 测试：",
-        *test_lines,
-        "",
-        "## 风险与交付物",
+        "## 风险",
         "- 剩余风险：",
         *_bullet_lines(risks),
-        f"- 最终 Patch：{delivery.get('diff_path') or '未生成'}",
     ]
-    if generation_error:
-        lines.append(f"- 报告生成：程序模板（{generation_error}）")
-    else:
-        lines.append("- 报告生成：程序模板")
     return "\n".join(lines).strip() + "\n"
+
+
+def append_run_result(
+    report_path: str | Path,
+    summary: Mapping[str, Any],
+) -> None:
+    """在总结末尾追加程序生成的确定性运行结果。"""
+
+    path = Path(report_path)
+    content = path.read_text(encoding="utf-8")
+    if "## 运行结果" in content:
+        raise ValueError("报告已包含运行结果，禁止重复追加。")
+
+    changed_files = list(summary.get("changed_files") or [])
+    changed_lines = _bullet_lines(changed_files)
+    failure = summary.get("failure") or {}
+    run_dir = summary.get("run_dir") or "未获得"
+    logs_dir = str(Path(run_dir) / "logs") if run_dir != "未获得" else "未获得"
+    lines = [
+        "",
+        "## 运行结果",
+        f"- 状态：{summary.get('status') or '失败'}",
+        f"- 模型：{summary.get('model') or '未配置'}",
+        f"- 运行 ID：{summary.get('run_id') or '未获得'}",
+        f"- 修复轮次：{summary.get('repair_round', 0)}",
+        f"- 结束阶段：{summary.get('phase') or '未知'}",
+        f"- 下一动作：{summary.get('next_action') or '无'}",
+        "- 修改文件：",
+        *changed_lines,
+        f"- 测试结果：{summary.get('test_summary') or '未执行'}",
+        f"- 工作区：{summary.get('worktree_status') or '未知'}",
+        f"- 失败类型：{failure.get('type') or '无'}",
+        f"- 失败原因：{failure.get('message') or '无'}",
+        f"- 处理建议：{failure.get('suggestion') or '无'}",
+        f"- 总 Token：{int(summary.get('total_tokens') or 0):,}",
+        f"- 最终耗时：{float(summary.get('total_duration') or 0):.2f} 秒",
+        f"- 报告生成：{summary.get('report_generation') or '程序模板'}",
+        "- 产物地址：",
+        f"  - 运行目录：{run_dir}",
+        f"  - 日志目录：{logs_dir}",
+        f"  - 报告：{path}",
+        f"  - 最终 Patch：{summary.get('diff_path') or '未生成'}",
+    ]
+    with path.open("a", encoding="utf-8", newline="\n") as stream:
+        stream.write("\n".join(lines).rstrip() + "\n")
 
 
 def _write_report(run_dir: str | Path, content: str) -> Path:
@@ -282,7 +294,6 @@ def create_run_report(
             fallback_used = True
             content = build_fallback_report(
                 context,
-                generation_error=generation_error,
             )
 
     try:

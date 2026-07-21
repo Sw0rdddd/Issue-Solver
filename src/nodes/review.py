@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any
 
+from config import Setting
 from graph.state import ResolverState
 from prompts.reviewer import build_review_input
 from schemas.coding_result import CodingResult
@@ -8,6 +9,7 @@ from schemas.coding_task import CodingTask
 from schemas.failure import ClassifiedFailure, failure_from_exception, make_failure
 from schemas.issue_specification import IssueSpec
 from schemas.review_result import ReviewResult
+from services.agent_execution import invoke_tool_agent
 from services.artifacts import write_round_artifact
 
 
@@ -51,7 +53,8 @@ def build_review_node(review_agent: Any):
                 raise RuntimeError("State 中缺少 base_commit。")
 
             try:
-                response = review_agent.invoke(
+                response = invoke_tool_agent(
+                    review_agent,
                     {
                         "messages": [
                             {
@@ -67,7 +70,12 @@ def build_review_node(review_agent: Any):
                                 ),
                             }
                         ]
-                    }
+                    },
+                    agent_name="Review Agent",
+                    recursion_limit=state.get(
+                        "agent_recursion_limit",
+                        Setting().AGENT_RECURSION_LIMIT,
+                    ),
                 )
             except Exception as exc:
                 raise ClassifiedFailure(

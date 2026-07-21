@@ -1,9 +1,11 @@
 from typing import Any
 
+from config import Setting
 from graph.state import ResolverState
 from prompts.explorer import build_explore_input
 from schemas.explore_report import ExploreReport
 from schemas.failure import ClassifiedFailure, failure_from_exception, make_failure
+from services.agent_execution import invoke_tool_agent
 from services.artifacts import write_stage_artifact
 
 
@@ -34,7 +36,8 @@ def build_explore_node(explore_agent: Any):
             )
 
             try:
-                result = explore_agent.invoke(
+                result = invoke_tool_agent(
+                    explore_agent,
                     {
                         "messages": [
                             {
@@ -42,7 +45,12 @@ def build_explore_node(explore_agent: Any):
                                 "content": user_message,
                             }
                         ]
-                    }
+                    },
+                    agent_name="Explore Agent",
+                    recursion_limit=state.get(
+                        "agent_recursion_limit",
+                        Setting().AGENT_RECURSION_LIMIT,
+                    ),
                 )
             except Exception as exc:
                 raise ClassifiedFailure(

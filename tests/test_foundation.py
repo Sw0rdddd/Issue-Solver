@@ -28,6 +28,12 @@ def test_setting_reflects_loaded_environment() -> None:
         "REASONING_HISTORY", "auto"
     ).strip().lower()
     assert setting.MAX_CYCLES == int(os.environ.get("MAX_CYCLES", "5"))
+    assert setting.AGENT_RECURSION_LIMIT == int(
+        os.environ.get("AGENT_RECURSION_LIMIT", "60")
+    )
+    assert setting.MAX_EXPLORE_BATCHES == int(
+        os.environ.get("MAX_EXPLORE_BATCHES", "5")
+    )
     assert setting.TEST_TIMEOUT == float(os.environ.get("TEST_TIMEOUT", "300"))
     assert setting.TEST_TAIL_LINES == int(
         os.environ.get("TEST_TAIL_LINES", "100")
@@ -39,6 +45,8 @@ def test_setting_reflects_loaded_environment() -> None:
 
 def test_setting_reads_runtime_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MAX_CYCLES", "7")
+    monkeypatch.setenv("AGENT_RECURSION_LIMIT", "80")
+    monkeypatch.setenv("MAX_EXPLORE_BATCHES", "4")
     monkeypatch.setenv("TEST_TIMEOUT", "12.5")
     monkeypatch.setenv("TEST_TAIL_LINES", "42")
     monkeypatch.setenv("RUN_ROOT", "custom-runs")
@@ -47,6 +55,8 @@ def test_setting_reads_runtime_overrides(monkeypatch: pytest.MonkeyPatch) -> Non
     setting = Setting()
 
     assert setting.MAX_CYCLES == 7
+    assert setting.AGENT_RECURSION_LIMIT == 80
+    assert setting.MAX_EXPLORE_BATCHES == 4
     assert setting.TEST_TIMEOUT == 12.5
     assert setting.TEST_TAIL_LINES == 42
     assert setting.RUN_ROOT == Path("custom-runs")
@@ -57,6 +67,8 @@ def test_setting_reads_runtime_overrides(monkeypatch: pytest.MonkeyPatch) -> Non
     ("name", "value"),
     [
         ("MAX_CYCLES", "0"),
+        ("AGENT_RECURSION_LIMIT", "0"),
+        ("MAX_EXPLORE_BATCHES", "0"),
         ("TEST_TIMEOUT", "not-a-number"),
         ("TEST_TAIL_LINES", "-1"),
         ("RUN_ROOT", "   "),
