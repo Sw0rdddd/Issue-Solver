@@ -3,6 +3,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from graph.state import ResolverState
 from prompts.issue_parser import (
+    ISSUE_PARSER_RECOVERY_PROMPT,
     ISSUE_PARSER_SYSTEM_PROMPT,
     build_issue_parser_input,
 )
@@ -58,11 +59,29 @@ def build_parse_issue_node(model: BaseChatModel):
             )
 
             # 3. 将原始 Issue 转换成 IssueSpec
+            messages = [
+                SystemMessage(content=ISSUE_PARSER_SYSTEM_PROMPT),
+                HumanMessage(content=user_message),
+            ]
             try:
-                issue = structured_model.invoke([
-                        SystemMessage(content=ISSUE_PARSER_SYSTEM_PROMPT),
-                        HumanMessage(content=user_message),
-                    ])
+                issue = structured_model.invoke(messages)
+                acceptance_criteria = [
+                    criterion.strip()
+                    for criterion in issue.acceptance_criteria
+                    if criterion.strip()
+                ]
+                if not acceptance_criteria:
+                    recovered_issue = structured_model.invoke(
+                        [
+                            *messages,
+                            HumanMessage(content=ISSUE_PARSER_RECOVERY_PROMPT),
+                        ]
+                    )
+                    acceptance_criteria = [
+                        criterion.strip()
+                        for criterion in recovered_issue.acceptance_criteria
+                        if criterion.strip()
+                    ]
             except Exception as exc:
                 return {
                     "status": "FAILED",
@@ -73,11 +92,6 @@ def build_parse_issue_node(model: BaseChatModel):
                     ),
                 }
 
-            acceptance_criteria = [
-                criterion.strip()
-                for criterion in issue.acceptance_criteria
-                if criterion.strip()
-            ]
             if not acceptance_criteria:
                 return {
                     "status": "FAILED",
