@@ -1,6 +1,7 @@
 # Issue Solver
 
 [![Tests](https://github.com/Sw0rdddd/Issue-Solver/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Sw0rdddd/Issue-Solver/actions/workflows/ci.yml)
+![Coverage ≥80%](https://img.shields.io/badge/coverage-%E2%89%A580%25-brightgreen)
 ![Python 3.13](https://img.shields.io/badge/python-3.13-3776AB?logo=python&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 

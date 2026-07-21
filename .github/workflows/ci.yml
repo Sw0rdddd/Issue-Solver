@@ -11,6 +11,9 @@ jobs:
   quality:
     runs-on: windows-latest
     timeout-minutes: 20
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
 
     steps:
       - name: Checkout
@@ -28,6 +31,13 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --locked --group dev
+
+      - name: Prepare test configuration
+        shell: pwsh
+        run: |
+          $content = Get-Content .env.example -Raw
+          $content = $content -replace '(?m)^API_KEY=.*$', 'API_KEY=test-api-key'
+          Set-Content .env -Value $content -Encoding utf8
 
       - name: Ruff
         run: uv run --locked ruff check --output-format=github src tests

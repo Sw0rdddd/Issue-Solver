@@ -39,6 +39,25 @@ def create_venv(path: Path, *, system_packages: bool) -> None:
         with_pip=False,
         system_site_packages=system_packages,
     ).create(path)
+    if not system_packages:
+        return
+
+    python = path / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    result = subprocess.run(
+        [str(python), "-c", "import site; print(site.getsitepackages()[0])"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+    pytest_file = pytest.__file__
+    assert pytest_file is not None
+    dependency_root = Path(pytest_file).resolve().parent.parent
+    site_packages = Path(result.stdout.strip())
+    (site_packages / "issue_solver_test_dependencies.pth").write_text(
+        str(dependency_root),
+        encoding="utf-8",
+    )
 
 
 def test_discovers_repo_venv_and_validates_pytest(git_repo: Path) -> None:
