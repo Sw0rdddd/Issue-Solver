@@ -87,7 +87,7 @@ def test_review_node_saves_round_result_and_enters_test(
         FakeReviewAgent(error=RuntimeError("模型不可用")),
     ],
 )
-def test_review_node_failure_logs_and_requests_rollback(
+def test_review_node_failure_logs_failure(
     tmp_path: Path,
     agent: FakeReviewAgent,
 ) -> None:
@@ -95,11 +95,11 @@ def test_review_node_failure_logs_and_requests_rollback(
 
     assert result["status"] == "FAILED"
     assert result["phase"] == "REVIEW"
-    assert result["rollback_prompt_required"] is True
-    assert result["rollback_reason"] == result["error"]
+    assert "rollback_required" not in result
+    assert result["failure"].type in {"MODEL", "INTERNAL"}
     failure = json.loads(
         (tmp_path / "logs" / "failure_review_r02.json").read_text(
             encoding="utf-8"
         )
     )
-    assert failure["payload"]["reason"] == result["error"]
+    assert failure["payload"]["failure"] == result["failure"].model_dump()

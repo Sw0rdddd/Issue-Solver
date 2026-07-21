@@ -8,6 +8,8 @@ from pydantic import (
     model_validator,
 )
 
+from schemas.failure import FailureInfo
+
 
 NonEmptyText = Annotated[
     str,
@@ -31,7 +33,13 @@ class TestResult(BaseModel):
     )
     cwd: NonEmptyText = Field(description="测试进程工作目录")
     python_executable: NonEmptyText = Field(description="目标虚拟环境解释器")
-    status: Literal["PASSED", "FAILED", "ENVIRONMENT_ERROR", "TIMEOUT"]
+    status: Literal[
+        "PASSED",
+        "FAILED",
+        "ENVIRONMENT_ERROR",
+        "TIMEOUT",
+        "SAFETY_ERROR",
+    ]
     exit_code: int = Field(strict=True, description="测试进程退出码")
     duration: float = Field(
         strict=True,
@@ -42,6 +50,7 @@ class TestResult(BaseModel):
     stdout_path: NonEmptyText = Field(description="完整标准输出日志路径")
     stderr_path: NonEmptyText = Field(description="完整错误输出日志路径")
     output_tail: OutputTail = Field(description="提供给 Coordinator 的日志尾部")
+    failure: FailureInfo | None = None
 
     @model_validator(mode="after")
     def validate_status_matches_exit_code(self) -> "TestResult":
@@ -49,6 +58,26 @@ class TestResult(BaseModel):
             raise ValueError("PASSED 的 exit_code 必须为 0。")
         if self.status == "FAILED" and self.exit_code == 0:
             raise ValueError("FAILED 的 exit_code 不能为 0。")
-        if self.status in {"ENVIRONMENT_ERROR", "TIMEOUT"} and self.exit_code != -1:
+        if self.status in {
+            "ENVIRONMENT_ERROR",
+            "TIMEOUT",
+            "SAFETY_ERROR",
+        } and self.exit_code != -1:
             raise ValueError(f"{self.status} 的 exit_code 必须为 -1。")
+        expected_failure_types = {
+            "FAILED": "SOLUTION",
+            "ENVIRONMENT_ERROR": "ENVIRONMENT",
+            "TIMEOUT": "LIMIT",
+            "SAFETY_ERROR": "SAFETY",
+        }
+        if self.status == "PASSED" and self.failure is not None:
+            raise ValueError("PASSED 不能包含 failure。")
+        if self.status != "PASSED":
+            if self.failure is None:
+                raise ValueError(f"{self.status} 必须包含 failure。")
+            expected = expected_failure_types[self.status]
+            if self.failure.type != expected:
+                raise ValueError(
+                    f"{self.status} 的 failure.type 必须为 {expected}。"
+                )
         return self

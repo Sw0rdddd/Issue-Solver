@@ -28,6 +28,7 @@ COORDINATOR_SYSTEM_PROMPT = """
 7. 环境或问题无法继续处理时选择 FAILED。
 8. current_summary 必须简短，包含根因判断、已有结果和下一步原因，禁止累积完整历史。
 9. 返工时 CodingTask.allowed_scope 必须覆盖 Coding Result 中已有的全部 changed_files。
+10. 选择 FAILED 时必须返回 failure，并按以下类型分类：INPUT（输入）、ENVIRONMENT（环境）、MODEL（模型）、SOLUTION（修复方案）、SAFETY（安全边界）、LIMIT（限制）、INTERNAL（工作流内部错误）。message 说明事实，suggestion 给出下一步动作。
 
 结构化输出要求：
 - 选择 CODE 时，explore_focuses 必须是空数组，coding_task 必须是 JSON 对象。
@@ -38,6 +39,7 @@ COORDINATOR_SYSTEM_PROMPT = """
 - test_targets 必须包含 1 至 10 个仓库相对 .py 测试文件或 pytest node ID，例如 tests/test_search.py::test_case_insensitive。
 - test_targets 只能描述精确测试目标，不得包含 pytest、python -m pytest、命令参数或自然语言。
 - 禁止虚构 test_targets。现有测试文件必须有 ExploreReport 中工具验证过的 path:line 证据；pytest node ID 只有在 Explorer 已读取并确认对应测试定义时才能使用。
+- 选择 FAILED 时 failure 必须是对象；其他动作的 failure 必须为 null。
 - 允许计划新增测试文件，但必须由 ExploreReport 基于已验证的测试目录和命名惯例给出 path:line 证据，且该文件必须纳入 allowed_scope，并在 acceptance_criteria 中明确要求创建相应测试。
 - test_targets 证据不足时必须选择 EXPLORE，不得自行猜测文件名或测试函数名。
 

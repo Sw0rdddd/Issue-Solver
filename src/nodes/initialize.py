@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from graph.state import ResolverState
+from schemas.failure import ClassifiedFailure, failure_from_exception, make_failure
 from schemas.environment_info import EnvironmentInfo
 from services.project_detector import (
     detect_project_type,
@@ -33,8 +34,12 @@ def initialize_node(state: ResolverState) -> dict:
 
         # 防止覆盖用户已有的代码修改。
         if not is_worktree_clean(repo_root):
-            raise RuntimeError(
-                "Git 工作区存在未提交修改，请先提交或清理后再运行。"
+            raise ClassifiedFailure(
+                make_failure(
+                    "SAFETY",
+                    "Git 工作区存在未提交修改。",
+                    "请先提交或清理现有修改后再运行。",
+                )
             )
 
         # 记录任务开始时的代码版本。
@@ -63,5 +68,5 @@ def initialize_node(state: ResolverState) -> dict:
     except Exception as exc:
         return {
             "status": "FAILED",
-            "error": str(exc),
+            "failure": failure_from_exception(exc, "ENVIRONMENT"),
         }

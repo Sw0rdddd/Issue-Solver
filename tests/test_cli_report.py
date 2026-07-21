@@ -38,7 +38,7 @@ def test_report_session_uses_template_when_agent_build_fails(
 
     assert result.path == str(tmp_path / "report.md")
     assert result.fallback_used is True
-    assert "无法构建 Reporter" in result.error
+    assert "无法构建 Reporter" in result.failure.message
     assert "使用程序模板" in output.getvalue()
 
 
@@ -68,5 +68,5 @@ def test_report_session_only_writes_once(tmp_path: Path) -> None:
 
     assert first.path == str(tmp_path / "report.md")
     assert second.path is None
-    assert second.error == "本次运行的报告已经生成。"
+    assert second.failure.message == "本次运行的报告已经生成。"
     assert (tmp_path / "report.md").is_file()

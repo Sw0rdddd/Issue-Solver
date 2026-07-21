@@ -1,6 +1,12 @@
 from pathlib import Path
 
 from graph.state import ResolverState
+from schemas.failure import (
+    ClassifiedFailure,
+    FailureInfo,
+    failure_from_exception,
+    make_failure,
+)
 from services.artifacts import write_round_artifact
 from tools.coding import CodingToolContext, rollback_to_base, save_final_patch
 
@@ -25,11 +31,14 @@ def _context_from_state(state: ResolverState) -> CodingToolContext:
     )
 
 
-def rollback_state_to_base(state: ResolverState, reason: str) -> dict:
+def rollback_state_to_base(
+    state: ResolverState,
+    failure: FailureInfo,
+) -> dict:
     """按 State 中的受控上下文回滚当前累计修改。"""
 
     context = _context_from_state(state)
-    return rollback_to_base(context, reason)
+    return rollback_to_base(context, failure)
 
 
 def build_finalize_node():
@@ -60,7 +69,12 @@ def build_finalize_node():
                     ),
                 )
                 if not saved["success"]:
-                    raise RuntimeError(saved["error"] or "最终 Patch 保存失败。")
+                    raise ClassifiedFailure(
+                        FailureInfo.model_validate(
+                            saved["failure"]
+                            or make_failure("INTERNAL", "最终 Patch 保存失败。")
+                        )
+                    )
                 outcome.update({"status": "FINISHED", **saved["data"]})
                 write_round_artifact(
                     run_dir=run_dir,
@@ -76,10 +90,27 @@ def build_finalize_node():
                 }
 
             if state.get("rollback_required"):
-                reason = state.get("rollback_reason", state.get("error", "运行失败。"))
-                rolled_back = rollback_state_to_base(state, reason)
+                failure = state.get("failure") or make_failure(
+                    "INTERNAL",
+                    "运行失败但未提供失败信息。",
+                )
+                rolled_back = rollback_state_to_base(state, failure)
                 if not rolled_back["success"]:
-                    raise RuntimeError(rolled_back["error"] or "回滚失败。")
+                    rollback_failure = FailureInfo.model_validate(
+                        rolled_back["failure"]
+                        or make_failure(
+                            "SAFETY",
+                            "回滚失败但工具未提供原因。",
+                        )
+                    )
+                    outcome["rollback_failure"] = rollback_failure
+                    return {
+                        "phase": "FINALIZE",
+                        "status": "FAILED",
+                        "failure": failure,
+                        "rollback_failure": rollback_failure,
+                        "changed_files": state.get("changed_files", []),
+                    }
                 outcome.update(
                     {
                         "status": "FAILED",
@@ -93,7 +124,11 @@ def build_finalize_node():
                     {
                         "status": "FAILED",
                         "rollback_success": False,
-                        "reason": state.get("error", "运行失败。"),
+                        "failure": state.get("failure")
+                        or make_failure(
+                            "INTERNAL",
+                            "运行失败但未提供失败信息。",
+                        ),
                     }
                 )
                 changed_files = state.get("changed_files", [])
@@ -113,11 +148,14 @@ def build_finalize_node():
             }
 
         except Exception as exc:
-            error = f"Finalize 失败：{exc}"
             return {
                 "phase": "FINALIZE",
                 "status": "FAILED",
-                "error": error,
+                "failure": failure_from_exception(
+                    exc,
+                    "INTERNAL",
+                    prefix="Finalize 失败：",
+                ),
             }
 
     return finalize_node

@@ -5,6 +5,8 @@ from pathlib import Path
 
 from langchain.tools import tool
 
+from schemas.failure import FailureType, format_failure_for_agent, make_failure
+
 IGNORED_NAMES = {
     ".git",
     ".venv",
@@ -22,6 +24,10 @@ IGNORED_NAMES = {
 MAX_SEARCH_FILE_BYTES = 1_048_576
 MAX_SEARCH_FILES = 2_500
 MAX_SYMBOL_RESULTS = 150
+
+
+def _failure(failure_type: FailureType, message: str) -> str:
+    return format_failure_for_agent(make_failure(failure_type, message))
 
 
 def _read_searchable_file(
@@ -73,13 +79,13 @@ def search_text(repo_path: str, query: str, path: str = ".", file_pattern: str =
     """
 
     if not query.strip():
-        return "错误：query 不能为空。"
+        return _failure("INPUT", "query 不能为空。")
 
     if max_results < 1:
-        return "错误：max_results 必须大于等于 1。"
+        return _failure("INPUT", "max_results 必须大于等于 1。")
 
     if max_results > 200:
-        return "错误：max_results 不能大于 200。"
+        return _failure("INPUT", "max_results 不能大于 200。")
 
     repo_root = Path(repo_path).resolve()
     target = (repo_root / path).resolve()
@@ -88,15 +94,15 @@ def search_text(repo_path: str, query: str, path: str = ".", file_pattern: str =
     try:
         relative_target = target.relative_to(repo_root)
     except ValueError:
-        return "错误：禁止搜索仓库之外的路径。"
+        return _failure("SAFETY", "禁止搜索仓库之外的路径。")
     if any(part in IGNORED_NAMES for part in relative_target.parts):
-        return "错误：禁止搜索依赖或缓存目录。"
+        return _failure("SAFETY", "禁止搜索依赖或缓存目录。")
 
     if not target.exists():
-        return f"错误：路径不存在：{path}"
+        return _failure("INPUT", f"路径不存在：{path}")
 
     if not target.is_dir():
-        return f"错误：该路径不是目录：{path}"
+        return _failure("INPUT", f"该路径不是目录：{path}")
 
     search_query = query if case_sensitive else query.lower()
     results: list[str] = []
@@ -185,9 +191,9 @@ def search_symbol(repo_path: str,symbol: str,path: str = ".") -> str:
     try:
         relative_target = target.relative_to(repo_root)
     except ValueError:
-        return "错误：禁止访问仓库之外的路径。"
+        return _failure("SAFETY", "禁止访问仓库之外的路径。")
     if any(part in IGNORED_NAMES for part in relative_target.parts):
-        return "错误：禁止搜索依赖或缓存目录。"
+        return _failure("SAFETY", "禁止搜索依赖或缓存目录。")
 
     results: list[str] = []
     scanned_files = 0

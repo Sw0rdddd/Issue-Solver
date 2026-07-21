@@ -128,11 +128,10 @@ def test_explore_node_rejects_missing_issue(tmp_path: Path) -> None:
         }
     )
 
-    assert result == {
-        "explore_errors": [
-            "仓库探索失败：State 中缺少规范化后的 Issue。"
-        ],
-    }
+    assert result["explore_failures"][0].type == "INTERNAL"
+    assert "State 中缺少规范化后的 Issue" in (
+        result["explore_failures"][0].message
+    )
     assert agent.calls == []
 
 
@@ -152,11 +151,8 @@ def test_explore_node_rejects_invalid_structured_response(
         }
     )
 
-    assert result == {
-        "explore_errors": [
-            "仓库探索失败：Explore Agent 未返回有效的 ExploreReport。"
-        ],
-    }
+    assert result["explore_failures"][0].type == "MODEL"
+    assert "Explore Agent 未返回有效" in result["explore_failures"][0].message
     assert not list((tmp_path / "logs").glob("explore_*.json"))
 
 
@@ -172,9 +168,8 @@ def test_explore_node_returns_agent_error(tmp_path: Path) -> None:
         }
     )
 
-    assert result == {
-        "explore_errors": ["仓库探索失败：模型调用失败"],
-    }
+    assert result["explore_failures"][0].type == "MODEL"
+    assert result["explore_failures"][0].message == "仓库探索失败：模型调用失败"
     assert not list((tmp_path / "logs").glob("explore_*.json"))
 
 
@@ -242,7 +237,7 @@ def test_send_branches_write_unique_report_files(tmp_path: Path) -> None:
             "repo_path": str(tmp_path),
             "run_dir": str(tmp_path),
             "explore_reports": [],
-            "explore_errors": [],
+            "explore_failures": [],
             "cycle": 0,
         }
     )

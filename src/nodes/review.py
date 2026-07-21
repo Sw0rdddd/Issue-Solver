@@ -5,6 +5,7 @@ from graph.state import ResolverState
 from prompts.reviewer import build_review_input
 from schemas.coding_result import CodingResult
 from schemas.coding_task import CodingTask
+from schemas.failure import ClassifiedFailure, failure_from_exception, make_failure
 from schemas.issue_specification import IssueSpec
 from schemas.review_result import ReviewResult
 from services.artifacts import write_round_artifact
@@ -49,30 +50,46 @@ def build_review_node(review_agent: Any):
             if not base_commit:
                 raise RuntimeError("State 中缺少 base_commit。")
 
-            response = review_agent.invoke(
-                {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": build_review_input(
-                                repo_path=repo_path,
-                                base_commit=base_commit,
-                                issue=issue,
-                                coding_task=coding_task,
-                                coding_result=coding_result,
-                                explore_reports=state.get("explore_reports", []),
-                                current_summary=state.get("current_summary", ""),
-                            ),
-                        }
-                    ]
-                }
-            )
+            try:
+                response = review_agent.invoke(
+                    {
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": build_review_input(
+                                    repo_path=repo_path,
+                                    base_commit=base_commit,
+                                    issue=issue,
+                                    coding_task=coding_task,
+                                    coding_result=coding_result,
+                                    explore_reports=state.get("explore_reports", []),
+                                    current_summary=state.get("current_summary", ""),
+                                ),
+                            }
+                        ]
+                    }
+                )
+            except Exception as exc:
+                raise ClassifiedFailure(
+                    failure_from_exception(
+                        exc,
+                        "MODEL",
+                        prefix="Review Agent 调用失败：",
+                    )
+                ) from exc
             if not isinstance(response, dict):
-                raise RuntimeError("Review Agent 未返回有效响应。")
+                raise ClassifiedFailure(
+                    make_failure("MODEL", "Review Agent 未返回有效响应。")
+                )
 
             candidate = response.get("structured_response")
             if not isinstance(candidate, ReviewResult):
-                raise RuntimeError("Review Agent 未返回有效的 ReviewResult。")
+                raise ClassifiedFailure(
+                    make_failure(
+                        "MODEL",
+                        "Review Agent 未返回有效的 ReviewResult。",
+                    )
+                )
             review_result = candidate
 
             write_round_artifact(
@@ -89,7 +106,11 @@ def build_review_node(review_agent: Any):
             }
 
         except Exception as exc:
-            error = f"Review 失败：{exc}"
+            failure = failure_from_exception(
+                exc,
+                "INTERNAL",
+                prefix="Review 失败：",
+            )
             if run_dir:
                 try:
                     write_round_artifact(
@@ -98,20 +119,21 @@ def build_review_node(review_agent: Any):
                         stage="REVIEW",
                         repair_round=max(repair_round, 1),
                         payload={
-                            "reason": error,
+                            "failure": failure,
                             "agent_report": _agent_report(review_result),
                         },
                     )
                 except Exception as log_exc:
-                    error = f"{error}；记录失败产物失败：{log_exc}"
+                    failure = make_failure(
+                        "INTERNAL",
+                        f"{failure.message}；记录失败产物失败：{log_exc}",
+                    )
 
             return {
                 "phase": "REVIEW",
                 "status": "FAILED",
                 "repair_round": max(repair_round, 1),
-                "rollback_prompt_required": True,
-                "rollback_reason": error,
-                "error": error,
+                "failure": failure,
             }
 
     return review_node

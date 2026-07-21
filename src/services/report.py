@@ -7,6 +7,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable
 from pydantic import BaseModel
 
+from schemas.failure import FailureInfo, make_failure
 from prompts.reporter import (
     REPORT_REQUIRED_LABELS,
     REPORT_SECTION_HEADINGS,
@@ -22,7 +23,7 @@ REPORT_FILENAME = "report.md"
 class ReportResult:
     path: str | None
     fallback_used: bool
-    error: str | None = None
+    failure: FailureInfo | None = None
 
 
 def _model_value(value: Any) -> dict[str, Any] | None:
@@ -53,10 +54,13 @@ def _filtered_test_result(value: Any) -> dict[str, Any] | None:
     result = _model_value(value)
     if result is None:
         return None
-    return {
+    filtered = {
         key: result.get(key)
-        for key in ("command", "status", "exit_code", "duration")
+        for key in ("command", "status", "exit_code", "duration", "failure")
     }
+    if filtered["failure"] is None:
+        filtered.pop("failure")
+    return filtered
 
 
 def build_report_context(
@@ -100,7 +104,7 @@ def build_report_context(
             "repo_path": state.get("repo_path"),
             "base_commit": state.get("base_commit"),
             "next_action": state.get("next_action"),
-            "error": state.get("error"),
+            "failure": _model_value(state.get("failure")),
             "worktree_status": worktree_status or "未知",
         },
         "issue": issue,
@@ -115,10 +119,6 @@ def build_report_context(
         "delivery": {
             "diff_path": state.get("diff_path"),
             "rollback_required": state.get("rollback_required", False),
-            "rollback_prompt_required": state.get(
-                "rollback_prompt_required",
-                False,
-            ),
         },
     }
 
@@ -149,6 +149,7 @@ def build_fallback_report(
     """使用固定模板生成不依赖模型的 Markdown 报告。"""
 
     run = context["run"]
+    failure = run.get("failure") or {}
     issue = context["issue"]
     coding = context["coding"]
     coding_result = coding.get("result") or {}
@@ -191,7 +192,9 @@ def build_fallback_report(
         f"- 结束阶段：{run.get('phase') or '未知'}",
         f"- 修复轮次：{run.get('repair_round', 0)}",
         f"- 工作区：{run.get('worktree_status') or '未知'}",
-        f"- 失败原因：{run.get('error') or '无'}",
+        f"- 失败类型：{failure.get('type') or '无'}",
+        f"- 失败原因：{failure.get('message') or '无'}",
+        f"- 处理建议：{failure.get('suggestion') or '无'}",
         "",
         "## 问题与根因",
         f"- Issue：{issue_title}",
@@ -285,17 +288,33 @@ def create_run_report(
     try:
         path = _write_report(run_dir, content)
     except Exception as exc:
-        error = str(exc)
+        failure = make_failure(
+            "ENVIRONMENT",
+            f"报告保存失败：{exc}",
+            "检查运行目录权限和已有报告文件后重试。",
+        )
         if generation_error:
-            error = f"{generation_error}；报告保存失败：{error}"
+            failure = failure.model_copy(
+                update={
+                    "message": f"{generation_error}；{failure.message}"
+                }
+            )
         return ReportResult(
             path=None,
             fallback_used=fallback_used,
-            error=error,
+            failure=failure,
         )
 
     return ReportResult(
         path=str(path),
         fallback_used=fallback_used,
-        error=generation_error,
+        failure=(
+            make_failure(
+                "MODEL",
+                generation_error,
+                "已使用程序模板生成报告；检查 Reporter 输出后再重试。",
+            )
+            if generation_error
+            else None
+        ),
     )

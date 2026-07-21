@@ -17,7 +17,9 @@ REPORT_REQUIRED_LABELS = (
     "- 结束阶段：",
     "- 修复轮次：",
     "- 工作区：",
+    "- 失败类型：",
     "- 失败原因：",
+    "- 处理建议：",
     "- Issue：",
     "- 根因：",
     "- 关键证据：",
@@ -40,7 +42,9 @@ REPORT_MARKDOWN_TEMPLATE = """
 - 结束阶段：<阶段>
 - 修复轮次：<数字>
 - 工作区：<保留修改、已回滚、未修改或未知>
+- 失败类型：<INPUT、ENVIRONMENT、MODEL、SOLUTION、SAFETY、LIMIT、INTERNAL 或无>
 - 失败原因：<失败原因或无>
+- 处理建议：<建议或无>
 
 ## 问题与根因
 - Issue：<Issue 标题或原始输入>

@@ -2,6 +2,7 @@ from graph import builder
 from schemas.coding_result import CodingResult
 from schemas.coding_task import CodingTask
 from schemas.explore_report import ExploreReport
+from schemas.failure import make_failure
 from schemas.issue_specification import IssueSpec
 from schemas.review_result import ReviewResult
 from schemas.test_result import TestResult as ExecutionResult
@@ -244,7 +245,7 @@ def test_compiled_graph_fans_out_and_joins_explore_nodes(
         lambda agent: lambda state: {
             "phase": "REVIEW",
             "status": "FAILED",
-            "error": "测试在 Review 停止",
+            "failure": make_failure("MODEL", "测试在 Review 停止"),
         },
     )
     monkeypatch.setattr(builder, "build_test_node", lambda: lambda state: {})
@@ -261,7 +262,7 @@ def test_compiled_graph_fans_out_and_joins_explore_nodes(
             "run_dir": ".",
             "issue_input": "查询失败",
             "explore_reports": [],
-            "explore_errors": [],
+            "explore_failures": [],
             "explore_stage_call": 0,
             "coding_stage_call": 0,
         }
@@ -422,7 +423,7 @@ def test_compiled_graph_runs_review_test_coordinator_and_finalize(
             "run_dir": ".",
             "issue_input": "查询失败",
             "explore_reports": [],
-            "explore_errors": [],
+            "explore_failures": [],
             "test_results": [],
         }
     )

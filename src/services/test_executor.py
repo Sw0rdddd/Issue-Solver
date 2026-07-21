@@ -6,6 +6,7 @@ from collections import deque
 from pathlib import Path
 
 from schemas.environment_info import EnvironmentInfo
+from schemas.failure import make_failure
 from schemas.test_result import TestResult
 from services.artifacts import ensure_run_logs_directory
 from services.python_environment import build_environment_variables
@@ -214,6 +215,26 @@ def execute_test_command(
             status = "ENVIRONMENT_ERROR"
             exit_code = -1
 
+    failure = None
+    if status == "FAILED":
+        failure = make_failure(
+            "SOLUTION",
+            "测试命令返回非零退出码。",
+            "查看 output_tail 和完整测试日志，并调整当前修复方案。",
+        )
+    elif status == "ENVIRONMENT_ERROR":
+        failure = make_failure(
+            "ENVIRONMENT",
+            "测试环境不可用。",
+            "查看 stderr 日志并修复目标虚拟环境或依赖。",
+        )
+    elif status == "TIMEOUT":
+        failure = make_failure(
+            "LIMIT",
+            f"测试执行超过 {timeout:g} 秒。",
+            "检查测试是否阻塞，或在确认合理后增加测试超时。",
+        )
+
     duration = time.monotonic() - started
     return TestResult(
         command=command,
@@ -226,21 +247,27 @@ def execute_test_command(
         stdout_path=str(stdout_path),
         stderr_path=str(stderr_path),
         output_tail=build_output_tail(stdout_path, stderr_path, tail_lines),
+        failure=failure,
     )
 
 
-def append_environment_error(
+def append_safety_error(
     result: TestResult,
     message: str,
     tail_lines: int,
 ) -> TestResult:
-    """在完整 stderr 中追加环境错误并返回同步后的结构化结果。"""
+    """在完整 stderr 中追加安全错误并返回同步后的结构化结果。"""
 
     _append_utf8(Path(result.stderr_path), f"\n测试环境错误：{message}\n")
     return result.model_copy(
         update={
-            "status": "ENVIRONMENT_ERROR",
+            "status": "SAFETY_ERROR",
             "exit_code": -1,
+            "failure": make_failure(
+                "SAFETY",
+                message,
+                "检查测试副作用并确保测试不会修改 Git 工作区。",
+            ),
             "output_tail": build_output_tail(
                 result.stdout_path,
                 result.stderr_path,

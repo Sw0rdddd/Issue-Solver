@@ -7,6 +7,12 @@ from graph.state import ResolverState
 from prompts.coder import build_coding_input
 from schemas.coding_result import CodingResult
 from schemas.coding_task import CodingTask
+from schemas.failure import (
+    ClassifiedFailure,
+    FailureInfo,
+    failure_from_exception,
+    make_failure,
+)
 from schemas.issue_specification import IssueSpec
 from services.artifacts import write_stage_artifact
 from tools.coding import (
@@ -36,6 +42,7 @@ def build_coding_node(model: BaseChatModel):
         repair_round = cycle + 1
         stage_call = state.get("coding_stage_call", 1)
         iteration = 0
+        rollback_failure: FailureInfo | None = None
 
         try:
             if cycle < 0:
@@ -71,15 +78,22 @@ def build_coding_node(model: BaseChatModel):
                 payload=coding_task,
             )
 
-            context = CodingToolContext.create(
-                repo_root=repo_path,
-                base_commit=base_commit,
-                run_dir=run_dir,
-                allowed_paths=coding_task.allowed_scope,
-                repair_round=repair_round,
-                stage_call=stage_call,
-                allow_existing_changes=bool(state.get("changed_files")),
-            )
+            try:
+                context = CodingToolContext.create(
+                    repo_root=repo_path,
+                    base_commit=base_commit,
+                    run_dir=run_dir,
+                    allowed_paths=coding_task.allowed_scope,
+                    repair_round=repair_round,
+                    stage_call=stage_call,
+                    allow_existing_changes=bool(state.get("changed_files")),
+                )
+            except ClassifiedFailure:
+                raise
+            except ValueError as exc:
+                raise ClassifiedFailure(
+                    make_failure("SAFETY", str(exc))
+                ) from exc
             agent = build_coding_agent(model, context)
             user_message = build_coding_input(
                 repo_path=repo_path,
@@ -88,43 +102,75 @@ def build_coding_node(model: BaseChatModel):
                 explore_reports=state.get("explore_reports", []),
                 current_summary=state.get("current_summary", ""),
             )
-            response = agent.invoke(
-                {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": user_message,
-                        }
-                    ]
-                }
-            )
+            try:
+                response = agent.invoke(
+                    {
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": user_message,
+                            }
+                        ]
+                    }
+                )
+            except Exception as exc:
+                raise ClassifiedFailure(
+                    failure_from_exception(
+                        exc,
+                        "MODEL",
+                        prefix="Coding Agent 调用失败：",
+                    )
+                ) from exc
             if not isinstance(response, dict):
-                raise RuntimeError("Coding Agent 未返回有效响应。")
+                raise ClassifiedFailure(
+                    make_failure("MODEL", "Coding Agent 未返回有效响应。")
+                )
 
             coding_result = response.get("structured_response")
             if not isinstance(coding_result, CodingResult):
-                raise RuntimeError(
-                    "Coding Agent 未返回有效的 CodingResult。"
+                raise ClassifiedFailure(
+                    make_failure(
+                        "MODEL",
+                        "Coding Agent 未返回有效的 CodingResult。",
+                    )
                 )
 
             iteration = get_coding_iteration_count(context)
             if not coding_result.success:
-                raise RuntimeError("Coding Agent 报告任务未完成。")
+                raise ClassifiedFailure(coding_result.failure)
             if coding_result.diff_path is not None:
-                raise RuntimeError("Coding 阶段的 diff_path 必须为 null。")
+                raise ClassifiedFailure(
+                    make_failure(
+                        "MODEL",
+                        "Coding 阶段的 diff_path 必须为 null。",
+                    )
+                )
 
             inspection = inspect_coding_changes(context)
             if not inspection["success"]:
-                raise RuntimeError(
-                    f"无法检查 Coding 修改：{inspection['error']}"
-                )
+                inspection_failure = inspection["failure"]
+                if inspection_failure is None:
+                    inspection_failure = make_failure(
+                        "INTERNAL",
+                        "Coding 修改检查失败但工具未提供原因。",
+                    )
+                else:
+                    inspection_failure = FailureInfo.model_validate(
+                        inspection_failure
+                    )
+                raise ClassifiedFailure(inspection_failure)
             actual_files = inspection["data"]["changed_files"]
             diff = inspection["data"]["diff"]
             if not diff.strip():
-                raise RuntimeError("Coding Agent 未产生代码修改。")
+                raise ClassifiedFailure(
+                    make_failure("SOLUTION", "Coding Agent 未产生代码修改。")
+                )
             if coding_result.changed_files != actual_files:
-                raise RuntimeError(
-                    "CodingResult.changed_files 与实际修改不一致。"
+                raise ClassifiedFailure(
+                    make_failure(
+                        "SOLUTION",
+                        "CodingResult.changed_files 与实际修改不一致。",
+                    )
                 )
 
             write_stage_artifact(
@@ -146,16 +192,26 @@ def build_coding_node(model: BaseChatModel):
             }
 
         except Exception as exc:
-            error = f"Coding 失败：{exc}"
+            failure = failure_from_exception(
+                exc,
+                "INTERNAL",
+                prefix="Coding 失败：",
+            )
             if context is not None:
                 iteration = get_coding_iteration_count(context)
                 rollback = rollback_to_base(
                     context,
-                    error,
+                    failure,
                     agent_report=_agent_report(coding_result),
                 )
                 if not rollback["success"]:
-                    error = f"{error}；回滚失败：{rollback['error']}"
+                    rollback_failure = FailureInfo.model_validate(
+                        rollback["failure"]
+                        or make_failure(
+                            "SAFETY",
+                            "Coding 失败后的回滚未提供失败原因。",
+                        )
+                    )
             else:
                 run_dir = state.get("run_dir")
                 if run_dir:
@@ -168,25 +224,31 @@ def build_coding_node(model: BaseChatModel):
                             stage_call=max(stage_call, 1),
                             index=iteration,
                             payload={
-                                "reason": error,
+                                "failure": failure,
                                 "agent_report": _agent_report(coding_result),
                                 "base_commit": state.get("base_commit"),
                                 "changed_files_before_rollback": [],
                                 "rollback_success": False,
-                                "rollback_error": None,
+                                "rollback_failure": None,
                             },
                         )
                     except Exception as log_exc:
-                        error = f"{error}；记录失败产物失败：{log_exc}"
+                        failure = make_failure(
+                            "INTERNAL",
+                            f"{failure.message}；记录失败产物失败：{log_exc}",
+                        )
 
-            return {
+            update = {
                 "phase": "CODE",
                 "status": "FAILED",
                 "changed_files": [],
                 "coding_iteration": iteration,
                 "repair_round": repair_round,
                 "coding_stage_call": stage_call,
-                "error": error,
+                "failure": failure,
             }
+            if rollback_failure is not None:
+                update["rollback_failure"] = rollback_failure
+            return update
 
     return coding_node

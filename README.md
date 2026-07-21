@@ -69,6 +69,13 @@ python -m cli.main run --repo <target-repo> --issue "E:\path\to\ISSUE.md"
 uv tool install --editable <issue-solver-项目路径>
 ```
 
+可编辑安装会记录项目的绝对路径。移动或重命名 `issue-solver` 项目目录后，需要在新目录重新执行：
+
+```powershell
+uv sync --reinstall
+uv tool install --force --reinstall --editable <新的 issue-solver 项目路径>
+```
+
 安装后，在目标 Git 仓库或其任意子目录执行：
 
 ```powershell
@@ -83,6 +90,8 @@ issue-solver run --issue <issue-url-or-text>
 - 两种命令的运行记录默认都位于 `.issue-solver-runs/<repo>/<run-id>/`；
 - 详细 JSON、audit、测试输出和运行时目录统一保存在 `run-id/logs/`；
 - `report.md` 与最终 `diff.patch`、`diff.json` 保留在 `run-id/` 根部；模型总结不可用时自动使用程序模板；
+- 失败统一使用 `FailureInfo` 输出 `type`、`message`、`suggestion`；CLI、报告、JSON 产物和 Agent 工具反馈使用同一组错误类型；
+- 运行失败且存在修改时，交互终端默认询问是否回滚；非交互运行默认保留，安全违规和 Coding 中途失败仍自动回滚；
 - `RUN_ROOT` 可在 `.env` 配置，`--run-root` 可临时覆盖；运行日志不得写入目标仓库。
 
 完整的架构、运行逻辑、核心数据结构与设计取舍见[项目说明](docs/project-overview.md)。

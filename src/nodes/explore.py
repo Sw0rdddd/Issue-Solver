@@ -3,6 +3,7 @@ from typing import Any
 from graph.state import ResolverState
 from prompts.explorer import build_explore_input
 from schemas.explore_report import ExploreReport
+from schemas.failure import ClassifiedFailure, failure_from_exception, make_failure
 from services.artifacts import write_stage_artifact
 
 
@@ -16,7 +17,9 @@ def build_explore_node(explore_agent: Any):
             issue = state.get("issue")
 
             if issue is None:
-                raise RuntimeError("State 中缺少规范化后的 Issue。")
+                raise ClassifiedFailure(
+                    make_failure("INTERNAL", "State 中缺少规范化后的 Issue。")
+                )
 
             focus = state.get(
                 "explore_focus",
@@ -30,22 +33,34 @@ def build_explore_node(explore_agent: Any):
                 current_summary=state.get("current_summary", ""),
             )
 
-            result = explore_agent.invoke(
-                {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": user_message,
-                        }
-                    ]
-                }
-            )
+            try:
+                result = explore_agent.invoke(
+                    {
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": user_message,
+                            }
+                        ]
+                    }
+                )
+            except Exception as exc:
+                raise ClassifiedFailure(
+                    failure_from_exception(
+                        exc,
+                        "MODEL",
+                        prefix="仓库探索失败：",
+                    )
+                ) from exc
 
             report = result.get("structured_response")
 
             if not isinstance(report, ExploreReport):
-                raise RuntimeError(
-                    "Explore Agent 未返回有效的 ExploreReport。"
+                raise ClassifiedFailure(
+                    make_failure(
+                        "MODEL",
+                        "Explore Agent 未返回有效的 ExploreReport。",
+                    )
                 )
 
             repair_round = state.get(
@@ -74,7 +89,16 @@ def build_explore_node(explore_agent: Any):
 
         except Exception as exc:
             return {
-                "explore_errors": [f"仓库探索失败：{exc}"],
+                "explore_failures": [
+                    failure_from_exception(
+                        exc,
+                        "INTERNAL",
+                        prefix=(
+                            "" if isinstance(exc, ClassifiedFailure)
+                            else "仓库探索失败："
+                        ),
+                    )
+                ],
             }
 
     return explore_node

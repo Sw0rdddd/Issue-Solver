@@ -11,6 +11,7 @@ from prompts.coordinator import (
 from schemas.coding_task import CodingTask
 from schemas.coordinator_decision import CoordinatorDecision
 from schemas.explore_report import ExploreReport
+from schemas.failure import make_failure
 from schemas.issue_specification import IssueSpec
 from schemas.review_result import ReviewResult
 from schemas.test_result import TestResult as ExecutionResult
@@ -107,6 +108,11 @@ def make_test_result(status: str, name: str = "latest") -> ExecutionResult:
         stdout_path=f"{name}.out",
         stderr_path=f"{name}.err",
         output_tail=f"[{name}] output",
+        failure=(
+            None
+            if status == "PASSED"
+            else make_failure("SOLUTION", "测试失败")
+        ),
     )
 
 
@@ -174,6 +180,21 @@ def test_coordinator_decision_requires_task_for_code() -> None:
             next_action="CODE",
             current_summary="准备修改代码",
         )
+
+
+def test_coordinator_failed_decision_requires_failure() -> None:
+    with pytest.raises(ValidationError):
+        CoordinatorDecision(
+            next_action="FAILED",
+            current_summary="无法继续",
+        )
+
+    decision = CoordinatorDecision(
+        next_action="FAILED",
+        current_summary="环境不可用",
+        failure=make_failure("ENVIRONMENT", "虚拟环境不可用"),
+    )
+    assert decision.failure.type == "ENVIRONMENT"
 
 
 def test_coordinator_decision_rejects_conflicting_payload() -> None:
@@ -326,7 +347,8 @@ def test_coordinator_node_requires_initial_explore() -> None:
 
     assert result["status"] == "FAILED"
     assert result["next_action"] == "FAILED"
-    assert "首次 Coordinator 决策必须为 EXPLORE" in result["error"]
+    assert "首次 Coordinator 决策必须为 EXPLORE" in result["failure"].message
+    assert result["failure"].type == "MODEL"
 
 
 def test_coordinator_node_allows_finish_after_review_and_test_pass() -> None:
@@ -386,7 +408,7 @@ def test_coordinator_node_rejects_finish_without_passed_test() -> None:
     )
 
     assert result["status"] == "FAILED"
-    assert "Review 和本轮全部测试均通过" in result["error"]
+    assert "Review 和本轮全部测试均通过" in result["failure"].message
 
 
 def test_coordinator_node_uses_only_current_test_stage_in_prompt() -> None:
@@ -420,7 +442,10 @@ def test_coordinator_node_uses_only_current_test_stage_in_prompt() -> None:
             {
                 "issue": make_issue(),
                 "cycle": 0,
-                "explore_errors": ["分支一失败", "分支二失败"],
+                "explore_failures": [
+                    make_failure("MODEL", "分支一失败"),
+                    make_failure("MODEL", "分支二失败"),
+                ],
             },
             "分支一失败；分支二失败",
         ),
@@ -437,7 +462,7 @@ def test_coordinator_node_fails_without_calling_agent(
 
     assert result["status"] == "FAILED"
     assert result["next_action"] == "FAILED"
-    assert error_text in result["error"]
+    assert error_text in result["failure"].message
     assert agent.calls == []
 
 
@@ -448,7 +473,8 @@ def test_coordinator_node_returns_agent_error() -> None:
     result = node({"issue": make_issue(), "cycle": 0})
 
     assert result["status"] == "FAILED"
-    assert result["error"] == "Coordinator 决策失败：模型调用失败"
+    assert result["failure"].type == "MODEL"
+    assert result["failure"].message == "Coordinator 决策失败：模型调用失败"
 
 
 def test_coordinator_allows_finish_on_last_configured_cycle() -> None:
@@ -506,5 +532,6 @@ def test_coordinator_requests_rollback_when_last_cycle_needs_rework() -> None:
     )
 
     assert result["status"] == "FAILED"
-    assert result["rollback_required"] is True
-    assert "最大循环次数 5" in result["error"]
+    assert "rollback_required" not in result
+    assert "最大循环次数 5" in result["failure"].message
+    assert result["failure"].type == "LIMIT"

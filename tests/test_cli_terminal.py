@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from cli.terminal import TerminalReporter
 from schemas.environment_info import EnvironmentInfo
+from schemas.failure import make_failure
 from services.report import ReportResult
 
 
@@ -356,7 +357,7 @@ def test_report_fallback_is_hidden_from_quiet_progress() -> None:
         ReportResult(
             path="E:/runs/run_test/report.md",
             fallback_used=True,
-            error="模型不可用",
+            failure=make_failure("MODEL", "模型不可用"),
         )
     )
     reporter.summary(total_tokens=0, total_duration=1.0)
