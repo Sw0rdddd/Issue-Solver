@@ -1,6 +1,7 @@
 [project]
 name = "issue-solver"
 version = "0.1.0"
+license = "MIT"
 requires-python = ">=3.13"
 dependencies = [
     "dotenv>=0.9.9",
@@ -37,3 +38,28 @@ py-modules = ["config"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py313"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/test_graph_builder.py" = ["E731"]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.13"
+typeCheckingMode = "basic"
+
+[tool.coverage.run]
+source = ["src"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.411",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.22",
+]

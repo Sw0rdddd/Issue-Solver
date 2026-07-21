@@ -64,18 +64,24 @@ def build_parse_issue_node(model: BaseChatModel):
                 HumanMessage(content=user_message),
             ]
             try:
-                issue = structured_model.invoke(messages)
+                issue = IssueSpec.model_validate(
+                    structured_model.invoke(messages)
+                )
                 acceptance_criteria = [
                     criterion.strip()
                     for criterion in issue.acceptance_criteria
                     if criterion.strip()
                 ]
                 if not acceptance_criteria:
-                    recovered_issue = structured_model.invoke(
-                        [
-                            *messages,
-                            HumanMessage(content=ISSUE_PARSER_RECOVERY_PROMPT),
-                        ]
+                    recovered_issue = IssueSpec.model_validate(
+                        structured_model.invoke(
+                            [
+                                *messages,
+                                HumanMessage(
+                                    content=ISSUE_PARSER_RECOVERY_PROMPT
+                                ),
+                            ]
+                        )
                     )
                     acceptance_criteria = [
                         criterion.strip()

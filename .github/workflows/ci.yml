@@ -1,0 +1,39 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v9
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked --group dev
+
+      - name: Ruff
+        run: uv run --locked ruff check --output-format=github src tests
+
+      - name: Pyright
+        run: uv run --locked pyright src
+
+      - name: Tests and coverage
+        run: uv run --locked pytest -q --cov=src --cov-report=term-missing --cov-report=xml --cov-fail-under=80

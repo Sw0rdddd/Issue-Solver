@@ -1,6 +1,10 @@
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, StringConstraints
+
+
+EnvironmentKind = Literal["VENV", "CONDA"]
+EnvironmentSource = Literal[".venv", "venv", ".conda"]
 
 
 NonEmptyText = Annotated[
@@ -14,8 +18,8 @@ class EnvironmentInfo(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["VENV", "CONDA"]
+    kind: EnvironmentKind
     root_path: NonEmptyText
     python_executable: NonEmptyText
     pytest_version: NonEmptyText
-    source: Literal[".venv", "venv", ".conda"]
+    source: EnvironmentSource

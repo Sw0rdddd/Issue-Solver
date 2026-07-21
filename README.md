@@ -1,10 +1,16 @@
 # Issue Solver
 
+[![Tests](https://github.com/Sw0rdddd/Issue-Solver/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Sw0rdddd/Issue-Solver/actions/workflows/ci.yml)
+![Python 3.13](https://img.shields.io/badge/python-3.13-3776AB?logo=python&logoColor=white)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+
 `Issue Solver` 是一个面向本地 Git 仓库的自动化 Issue 修复工作流。它使用 LangGraph 编排需求解析、并行代码探索、受限修改、独立 Review 和真实 pytest 验证，并将每次决策、测试和最终 Patch 保存为可审计产物。
 
 > **当前定位：** 面向 Windows 开发环境，当前仅支持 Python + pytest，推荐用于中小型 Git 仓库。
 
 [测评结果](#测评结果) · [工程亮点](#工程亮点) · [架构概览](#架构概览) · [快速开始](#快速开始) · [项目文档](#文档)
+
+以下为使用 `gpt-5.4-nano` 处理示例 Issue 的效果展示。
 
 <p align="center">
   <img src="assets/workflow.gif" width="1200" alt="Issue Solver 运行演示">
@@ -14,9 +20,36 @@
 
 评测集选取 15 个真实开源项目的 GitHub Issue，包括 10 个普通案例和 5 个困难案例；系统对每个案例完成一次端到端运行。测评使用 `deepseek-v4-flash`，时间为 2026-07-21。
 
-| Issue 数 | 成功修复 | 总成功率 | 普通成功率 | 困难成功率 | Patch 生成率 | 测试通过率 | 平均耗时 | 平均轮次 | 平均 Token | 总 Token |
-|---------:|---------:|---------:|-----------:|-----------:|----------------:|-------------:|---------:|---------:|-----------:|---------:|
-| 15 | 13 | 86.67% | 100.00% | 60.00% | 86.67% | 86.67% | 411.67 秒 | 1.33 | 1,576,349.93 | 23,645,249 |
+<table>
+  <thead>
+    <tr>
+      <th nowrap align="right">Issue 数</th>
+      <th nowrap align="right">成功修复</th>
+      <th nowrap align="right">总成功率</th>
+      <th nowrap align="right">普通成功率</th>
+      <th nowrap align="right">困难成功率</th>
+      <th nowrap align="right">Patch 生成率</th>
+      <th nowrap align="right">测试通过率</th>
+      <th nowrap align="right">平均耗时</th>
+      <th nowrap align="right">平均轮次</th>
+      <th nowrap align="right">平均 Token</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td nowrap align="right">15</td>
+      <td nowrap align="right">13</td>
+      <td nowrap align="right">86.67%</td>
+      <td nowrap align="right">100.00%</td>
+      <td nowrap align="right">60.00%</td>
+      <td nowrap align="right">86.67%</td>
+      <td nowrap align="right">86.67%</td>
+      <td nowrap align="right">411.67 秒</td>
+      <td nowrap align="right">1.33</td>
+      <td nowrap align="right">1,576,349</td>
+    </tr>
+  </tbody>
+</table>
 
 测试通过率按全部 Issue 计算：只有定向测试和全量回归均通过才计为通过。普通案例成功率为 100.00%，困难案例成功率为 60.00%。完整口径、逐项数据和失败分析见[测评结果报告](evaluation/results.md)，评测基线与测试说明见[评测集](evaluation/benchmark.md)。
 
@@ -81,6 +114,14 @@ issue-solver run --issue <issue-url-or-text>
 ```
 
 运行报告、日志和最终 Patch 默认保存在 `.issue-solver-runs/<repo>/<run-id>/`，不会写入目标仓库。
+
+### 4. 运行质量检查
+
+```powershell
+uv run ruff check src tests
+uv run pyright src
+uv run pytest -q --cov=src --cov-report=term-missing --cov-fail-under=80
+```
 
 ## 文档
 

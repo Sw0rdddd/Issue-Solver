@@ -1,7 +1,7 @@
 from langchain.agents import create_agent
 from langchain.agents.structured_output import ToolStrategy
 from langchain_core.language_models import BaseChatModel
-from langchain_core.tools import tool
+from langchain_core.tools import BaseTool, tool
 
 from prompts.coder import CODING_SYSTEM_PROMPT
 from schemas.coding_result import CodingResult
@@ -10,7 +10,7 @@ from tools.filesystem import list_files, read_file
 from tools.search import search_symbol, search_text
 
 
-def build_coding_read_tools(context: CodingToolContext) -> list[object]:
+def build_coding_read_tools(context: CodingToolContext) -> list[BaseTool]:
     """创建已绑定仓库根目录的只读工具，避免模型传入错误根路径。"""
 
     repo_path = str(context.repo_root)

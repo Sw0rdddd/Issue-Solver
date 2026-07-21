@@ -1,7 +1,7 @@
 import argparse
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from config import Setting
 from graph.builder import build_graph
@@ -323,7 +323,7 @@ def run_command(
             "explore_stage_call": 0,
             "coding_stage_call": 0,
         }
-        result = None
+        result: dict[str, Any] | None = None
         reporter.graph_started()
         graph = graph.with_config(
             {
@@ -339,10 +339,15 @@ def run_command(
             stream_mode=["updates", "values"],
         ):
             if mode == "values":
-                result = event
-                report_state = dict(event)
+                if not isinstance(event, dict):
+                    raise TypeError("values 流事件必须是字典。")
+                result = cast(dict[str, Any], event)
+                report_state = dict(result)
                 continue
-            for node, update in event.items():
+            if not isinstance(event, dict):
+                raise TypeError("updates 流事件必须是字典。")
+            update_event = cast(dict[str, Any], event)
+            for node, update in update_event.items():
                 reporter.handle_update(node, update)
 
         if result is None:

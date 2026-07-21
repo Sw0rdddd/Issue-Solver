@@ -1,4 +1,6 @@
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from graph.state import ResolverState
 from schemas.failure import (
@@ -8,10 +10,15 @@ from schemas.failure import (
     make_failure,
 )
 from services.artifacts import write_round_artifact
-from tools.coding import CodingToolContext, rollback_to_base, save_final_patch
+from tools.coding import (
+    CodingToolContext,
+    CodingToolResult,
+    rollback_to_base,
+    save_final_patch,
+)
 
 
-def _context_from_state(state: ResolverState) -> CodingToolContext:
+def _context_from_state(state: Mapping[str, Any]) -> CodingToolContext:
     repo_path = state.get("repo_path")
     base_commit = state.get("base_commit")
     run_dir = state.get("run_dir")
@@ -32,9 +39,9 @@ def _context_from_state(state: ResolverState) -> CodingToolContext:
 
 
 def rollback_state_to_base(
-    state: ResolverState,
+    state: Mapping[str, Any],
     failure: FailureInfo,
-) -> dict:
+) -> CodingToolResult:
     """按 State 中的受控上下文回滚当前累计修改。"""
 
     context = _context_from_state(state)

@@ -3,11 +3,19 @@ import os
 import subprocess
 from pathlib import Path
 
-from schemas.environment_info import EnvironmentInfo
+from schemas.environment_info import (
+    EnvironmentInfo,
+    EnvironmentKind,
+    EnvironmentSource,
+)
 from services.artifacts import ensure_run_logs_directory
 
 
-ENVIRONMENT_NAMES = (".venv", "venv", ".conda")
+ENVIRONMENT_NAMES: tuple[EnvironmentSource, ...] = (
+    ".venv",
+    "venv",
+    ".conda",
+)
 
 
 def _is_within(path: Path, parent: Path) -> bool:
@@ -34,7 +42,7 @@ def _require_git_ignored(repo_root: Path, relative_name: str) -> None:
         raise RuntimeError("无法确认目标虚拟环境是否被 Git ignore。")
 
 
-def _environment_paths(root: Path, kind: str) -> list[Path]:
+def _environment_paths(root: Path, kind: EnvironmentKind) -> list[Path]:
     if os.name != "nt":
         return [root / "bin"]
     if kind == "CONDA":
@@ -81,7 +89,7 @@ def build_environment_variables(
     return values
 
 
-def _python_path(root: Path, kind: str) -> Path:
+def _python_path(root: Path, kind: EnvironmentKind) -> Path:
     if os.name != "nt":
         return root / "bin/python"
     if kind == "CONDA":
@@ -96,17 +104,21 @@ def discover_python_environment(
     """只发现并验证目标仓库根目录内已准备好的 Python 环境。"""
 
     repo_root = Path(repo_path).resolve()
-    candidates = [repo_root / name for name in ENVIRONMENT_NAMES if (repo_root / name).exists()]
+    candidates: list[tuple[EnvironmentSource, Path]] = [
+        (name, repo_root / name)
+        for name in ENVIRONMENT_NAMES
+        if (repo_root / name).exists()
+    ]
     if not candidates:
         raise RuntimeError(
             "目标仓库根目录未发现 .venv、venv 或 .conda；"
             "请开发者先创建虚拟环境并安装项目及 pytest 依赖后重试。"
         )
     if len(candidates) > 1:
-        names = ", ".join(path.name for path in candidates)
+        names = ", ".join(path.name for _, path in candidates)
         raise RuntimeError(f"目标仓库存在多个虚拟环境候选：{names}；请只保留一个。")
 
-    candidate = candidates[0]
+    candidate_name, candidate = candidates[0]
     if not candidate.is_dir():
         raise RuntimeError(f"目标虚拟环境不是目录：{candidate}")
     resolved = candidate.resolve(strict=True)
@@ -116,7 +128,9 @@ def discover_python_environment(
         raise RuntimeError("目标虚拟环境解析到了目标仓库之外。")
     _require_git_ignored(repo_root, candidate.name)
 
-    kind = "CONDA" if candidate.name == ".conda" else "VENV"
+    kind: EnvironmentKind = (
+        "CONDA" if candidate_name == ".conda" else "VENV"
+    )
     marker = resolved / ("conda-meta" if kind == "CONDA" else "pyvenv.cfg")
     if not marker.exists():
         raise RuntimeError(f"目标虚拟环境缺少标识文件：{marker}")
@@ -129,7 +143,7 @@ def discover_python_environment(
         root_path=str(resolved),
         python_executable=str(python),
         pytest_version="pending",
-        source=candidate.name,
+        source=candidate_name,
     )
     runtime = ensure_run_logs_directory(run_dir) / "environment_runtime"
     variables = build_environment_variables(provisional, runtime)

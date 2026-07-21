@@ -1,5 +1,5 @@
 from collections.abc import Callable, Sequence
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 import openai
 from langchain_core.language_models import LanguageModelInput
@@ -8,6 +8,7 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
 
 
 ModelProvider = Literal[
@@ -244,7 +245,7 @@ def build_chat_model(
     )
     return OpenAICompatibleChatModel(
         model=model,
-        api_key=api_key,
+        api_key=SecretStr(api_key),
         base_url=base_url,
         provider=provider,
         reasoning_history=reasoning_history,

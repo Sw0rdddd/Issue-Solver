@@ -720,7 +720,9 @@ py -m pytest ...
 
 ```powershell
 uv sync
-uv run pytest
+uv run ruff check src tests
+uv run pyright src
+uv run pytest -q --cov=src --cov-report=term-missing --cov-fail-under=80
 uv run pytest tests/test_project_detector.py -q
 ```
 
@@ -733,7 +735,7 @@ uv run pytest tests/test_project_detector.py -q
 - Windows 专用路径与解释器布局测试 VENV、Conda 和目录联接；
 - 真实子进程测试 argv 绑定、超时、日志、环境错误识别和临时目录清理。
 
-仓库没有配置覆盖率门槛，也没有自动格式化器或 linter。提交前至少运行相关定向测试、完整 `uv run pytest` 和 `git diff --check`；修改文档时还应检查相对链接和 Mermaid fence 是否闭合。
+仓库使用 Ruff 执行基础静态检查、Pyright 检查 `src/` 类型，并通过 pytest-cov 维持不低于 80% 的行覆盖率。GitHub Actions 在 Windows 和 Python 3.13 下使用锁定依赖执行同一组检查；当前没有自动格式化器。提交前还应运行相关定向测试和 `git diff --check`，修改文档时检查相对链接和 Mermaid fence 是否闭合。
 
 ### 15.6 文档与实现同步规则
 

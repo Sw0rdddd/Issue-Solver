@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
 
-from langchain.tools import tool
+from langchain_core.tools import BaseTool, tool
 
 from schemas.failure import (
     ClassifiedFailure,
@@ -947,17 +947,17 @@ def inspect_coding_changes(context: CodingToolContext) -> CodingToolResult:
     return result
 
 
-def build_coding_tools(context: CodingToolContext) -> list[Any]:
+def build_coding_tools(context: CodingToolContext) -> list[BaseTool]:
     """创建绑定仓库和修改范围的 Coding Agent 工具。"""
 
     @tool("apply_patch")
-    def apply_patch_tool(patch: str) -> dict:
+    def apply_patch_tool(patch: str) -> CodingToolResult:
         """应用 unified diff Patch；最多尝试 10 次，且必须使用 ASCII Diff 标记。"""
 
         return _apply_patch(context, patch)
 
     @tool("inspect_changes")
-    def inspect_changes_tool() -> dict:
+    def inspect_changes_tool() -> CodingToolResult:
         """查看当前工作区相对 base commit 的累计修改和 Diff。"""
 
         return inspect_coding_changes(context)
@@ -1015,12 +1015,12 @@ def save_final_patch(
 
     patch_written = False
     metadata_written = False
+    patch_path = context.run_dir / "diff.patch"
+    metadata_path = context.run_dir / "diff.json"
     try:
         if not review_approved or not tests_passed:
             raise ValueError("只有 Review APPROVE 且最新 Test PASSED 才能保存最终 Patch。")
 
-        patch_path = context.run_dir / "diff.patch"
-        metadata_path = context.run_dir / "diff.json"
         if patch_path.exists() or metadata_path.exists():
             raise ValueError("最终 Patch 已存在，禁止覆盖。")
 
