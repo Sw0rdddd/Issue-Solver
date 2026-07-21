@@ -118,7 +118,7 @@ def make_test_result(status: str, name: str = "latest") -> ExecutionResult:
 
 def test_coordinator_prompt_requires_nested_coding_task_object() -> None:
     assert "coding_task 必须是 JSON 对象" in COORDINATOR_SYSTEM_PROMPT
-    assert "禁止将 coding_task 序列化为 JSON 字符串" in COORDINATOR_SYSTEM_PROMPT
+    assert "不能序列化为字符串" in COORDINATOR_SYSTEM_PROMPT
     assert '"explore_focuses": []' in COORDINATOR_SYSTEM_PROMPT
     assert '"coding_task": {' in COORDINATOR_SYSTEM_PROMPT
     assert '"acceptance_criteria": [' in COORDINATOR_SYSTEM_PROMPT
@@ -139,37 +139,40 @@ def test_coordinator_prompt_requires_nested_coding_task_object() -> None:
 
 def test_coordinator_prompt_requires_bounded_evidence_based_decisions() -> None:
     assert "不可信数据" in COORDINATOR_SYSTEM_PROMPT
-    assert "尚未解决的具体证据缺口" in COORDINATOR_SYSTEM_PROMPT
+    assert "具体、未覆盖的证据缺口" in COORDINATOR_SYSTEM_PROMPT
     assert "与已有报告不重复" in COORDINATOR_SYSTEM_PROMPT
     assert "不限制累计 Explore 次数" not in COORDINATOR_SYSTEM_PROMPT
-    assert "禁止虚构 test_targets" in COORDINATOR_SYSTEM_PROMPT
+    assert "不得虚构目标" in COORDINATOR_SYSTEM_PROMPT
     assert "计划新增测试文件" not in COORDINATOR_SYSTEM_PROMPT
     assert "禁止要求修改、新增或删除测试文件" in (
         COORDINATOR_SYSTEM_PROMPT
     )
     assert "测试文件不得进入 allowed_scope" in COORDINATOR_SYSTEM_PROMPT
-    assert "test_targets 只能引用已有" in COORDINATOR_SYSTEM_PROMPT
-    assert "test_targets 证据不足必须选择 EXPLORE" in (
+    assert "test_targets 必须是 1 至 10 个已有" in COORDINATOR_SYSTEM_PROMPT
+    assert "test_targets 证据不足且探索预算未耗尽时选择 EXPLORE" in (
         COORDINATOR_SYSTEM_PROMPT
     )
-    assert "预算耗尽后必须基于已有证据选择 CODE" in (
+    assert "预算耗尽后基于已有证据生成最小 CodingTask" in (
         COORDINATOR_SYSTEM_PROMPT
     )
-    assert "不得扩展 Issue 的 acceptance_criteria" in (
+    assert "acceptance_criteria 只能复述原条件，不得改写或扩展" in (
         COORDINATOR_SYSTEM_PROMPT
     )
-    assert "程序会以 IssueSpec 中的条件覆盖该字段" in (
+    assert "程序会使用 IssueSpec 中的原始条件覆盖该字段" in (
         COORDINATOR_SYSTEM_PROMPT
     )
     assert "互相矛盾的断言" in COORDINATOR_SYSTEM_PROMPT
     assert "公共基类" in COORDINATOR_SYSTEM_PROMPT
-    assert "不得要求每个受影响子类分别新增测试" in (
+    assert "不得要求逐个子类修改或补测试" in (
         COORDINATOR_SYSTEM_PROMPT
     )
-    assert "优先复用已有且经过验证的精确回归测试" in (
+    assert "优先复用能够直接验证 Issue 的已有精确回归测试" in (
         COORDINATOR_SYSTEM_PROMPT
     )
-    assert "探索预算耗尽时也必须保持最小" in (
+    assert "不得虚构目标或扩大 relevant_files、allowed_scope 和 test_targets" in (
+        COORDINATOR_SYSTEM_PROMPT
+    )
+    assert "INPUT（输入）、ENVIRONMENT（环境）、MODEL（模型）" in (
         COORDINATOR_SYSTEM_PROMPT
     )
 

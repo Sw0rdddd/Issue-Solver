@@ -30,7 +30,7 @@ class ExploreReport(BaseModel):
 
     test_targets: list[str] = Field(
         default_factory=list,
-        description="经工具验证的现有测试目标，或有测试布局证据支持的计划新增测试文件",
+        description="经工具验证的现有测试文件或 pytest node ID",
     )
 
     unknowns: list[str] = Field(

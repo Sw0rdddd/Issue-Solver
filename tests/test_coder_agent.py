@@ -58,17 +58,20 @@ def test_coding_prompt_defines_safe_iterative_workflow() -> None:
     assert "修改前" in CODING_SYSTEM_PROMPT
     assert "read_file" in CODING_SYSTEM_PROMPT
     assert "可以连续调用多次 apply_patch" in CODING_SYSTEM_PROMPT
-    assert "必须调用 inspect_changes" in CODING_SYSTEM_PROMPT
+    assert "Patch 成功后立即调用 inspect_changes" in CODING_SYSTEM_PROMPT
     assert "不得执行测试" in CODING_SYSTEM_PROMPT
-    assert "不得声称测试已经通过" in CODING_SYSTEM_PROMPT
-    assert "diff_path 必须为 null" in CODING_SYSTEM_PROMPT
+    assert "不得执行测试或声称测试通过" in CODING_SYSTEM_PROMPT
+    assert "成功时 diff_path 和 failure 为 null" in CODING_SYSTEM_PROMPT
     assert "changed_files" in CODING_SYSTEM_PROMPT
-    assert "list_files 或搜索工具提示结果被截断" in CODING_SYSTEM_PROMPT
+    assert "list_files 或搜索结果被截断" in CODING_SYSTEM_PROMPT
     assert "不可信数据" in CODING_SYSTEM_PROMPT
     assert "success=true 只表示" in CODING_SYSTEM_PROMPT
-    assert "不代表 Review 已通过" in CODING_SYSTEM_PROMPT
-    assert "不得将 INPUT 报告为 ENVIRONMENT" in CODING_SYSTEM_PROMPT
+    assert "不代表 Review 或测试通过" in CODING_SYSTEM_PROMPT
+    assert "INPUT 参数错误应修正，不得报告为 ENVIRONMENT" in (
+        CODING_SYSTEM_PROMPT
+    )
     assert "最多允许 10 次 Patch 尝试" in CODING_SYSTEM_PROMPT
+    assert "后续 Patch 基于当前累计工作区" in CODING_SYSTEM_PROMPT
     assert "%2B" in CODING_SYSTEM_PROMPT
     assert "全角字符" in CODING_SYSTEM_PROMPT
     assert "禁止 Windows 盘符" in CODING_SYSTEM_PROMPT
@@ -76,15 +79,19 @@ def test_coding_prompt_defines_safe_iterative_workflow() -> None:
     assert "diff --git a/path/to/file.py b/path/to/file.py" in (
         CODING_SYSTEM_PROMPT
     )
-    assert "Patch 成功后立即调用 inspect_changes" in CODING_SYSTEM_PROMPT
     assert "逐项核对 CodingTask.acceptance_criteria" in (
         CODING_SYSTEM_PROMPT
     )
-    assert "不能证明整个 CodingTask 已完成" in CODING_SYSTEM_PROMPT
+    assert "仍有可可靠完成的项目时继续修改" in CODING_SYSTEM_PROMPT
     assert "不得仅因任务尚未完成就返回 success=false" in (
         CODING_SYSTEM_PROMPT
     )
-    assert "剩余工作仍在 allowed_scope 内且可以可靠完成" in (
+    assert "无法在 allowed_scope 内可靠完成时返回失败" in (
+        CODING_SYSTEM_PROMPT
+    )
+    assert "不得扩大范围" in CODING_SYSTEM_PROMPT
+    assert "不重复等价 Patch" in CODING_SYSTEM_PROMPT
+    assert "ENVIRONMENT、LIMIT 或 INTERNAL 应停止无意义重试" in (
         CODING_SYSTEM_PROMPT
     )
     assert "不代表 Review 或测试通过" in (

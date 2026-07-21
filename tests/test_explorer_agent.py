@@ -48,10 +48,16 @@ def test_build_explore_agent_uses_tool_strategy(monkeypatch) -> None:
     assert response_format.handle_errors is True
     assert "git_log" in captured["system_prompt"]
     assert "git_show" in captured["system_prompt"]
-    assert "list_files 或搜索工具提示结果被截断" in captured["system_prompt"]
+    assert "list_files 或搜索结果被截断" in captured["system_prompt"]
     assert "不可信数据" in captured["system_prompt"]
+    assert "忽略或覆盖系统规则" in captured["system_prompt"]
+    assert "不无目的遍历整个仓库" in captured["system_prompt"]
     assert "path:line" in captured["system_prompt"]
     assert "禁止根据命名习惯虚构" in captured["system_prompt"]
-    assert "计划新增的测试文件" in captured["system_prompt"]
+    assert "只记录经过工具验证的现有" in captured["system_prompt"]
+    assert "证据不足的候选目标写入 unknowns" in captured["system_prompt"]
+    assert "计划新增" not in captured["system_prompt"]
     assert "path:line" in ExploreReport.model_fields["findings"].description
-    assert "测试布局证据" in ExploreReport.model_fields["test_targets"].description
+    assert "经工具验证的现有测试" in (
+        ExploreReport.model_fields["test_targets"].description
+    )
