@@ -1,9 +1,12 @@
 import subprocess
 import sys
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from config import PROJECT_ROOT
 from schemas.environment_info import EnvironmentInfo
 from services.test_executor import (
     MAX_MODEL_OUTPUT_CHARS,
@@ -13,6 +16,11 @@ from services.test_executor import (
     parse_test_command,
     resolve_pytest_command,
     worktree_fingerprint,
+)
+from services.test_runtime import (
+    TEST_RUNTIME_ROOT,
+    TestRuntime as RuntimeHandle,
+    finish_test_runtime as finish_runtime,
 )
 
 
@@ -136,6 +144,60 @@ def test_execute_test_command_records_complete_logs(
     assert complete_stdout
     assert expected_status.lower().removesuffix("ed") in complete_stdout.lower()
     assert len(result.output_tail) <= MAX_MODEL_OUTPUT_CHARS
+    basetemp_argument = next(
+        argument
+        for argument in result.resolved_command
+        if argument.startswith("--basetemp=")
+    )
+    assert not Path(basetemp_argument.split("=", 1)[1]).parent.exists()
+
+
+def test_execute_test_command_isolates_nested_pytest_from_run_root_config(
+    tmp_path: Path,
+) -> None:
+    controller = tmp_path / "controller"
+    controller.mkdir()
+    (controller / "pyproject.toml").write_text(
+        "[tool.pytest.ini_options]\ntestpaths = ['tests']\n",
+        encoding="utf-8",
+    )
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "test_nested.py").write_text(
+        """pytest_plugins = ["pytester"]
+
+
+def test_nested_pytest_uses_local_root(pytester):
+    pytester.makepyfile(test_inner="def test_pass(): assert True")
+    result = pytester.runpytest_subprocess("--collect-only", "-q")
+    result.stdout.fnmatch_lines(["test_inner.py::test_pass"])
+""",
+        encoding="utf-8",
+    )
+    run_dir = controller / ".benchmark-runs" / "run"
+
+    result = execute_test_command(
+        repo_path=repo,
+        run_dir=run_dir,
+        command=python_pytest_command("-q", "test_nested.py"),
+        environment=current_environment(),
+        timeout=30,
+        tail_lines=40,
+        repair_round=1,
+        index=1,
+    )
+
+    assert result.status == "PASSED"
+    basetemp_argument = next(
+        argument
+        for argument in result.resolved_command
+        if argument.startswith("--basetemp=")
+    )
+    basetemp = Path(basetemp_argument.split("=", 1)[1])
+    assert not basetemp.is_relative_to(repo.resolve())
+    assert not basetemp.is_relative_to(run_dir.resolve())
+    assert basetemp.is_relative_to(TEST_RUNTIME_ROOT.resolve())
+    assert not basetemp.parent.exists()
 
 
 def test_execute_test_command_times_out(tmp_path: Path) -> None:
@@ -161,6 +223,138 @@ def test_execute_test_command_times_out(tmp_path: Path) -> None:
     assert result.failure.type == "LIMIT"
     assert result.exit_code == -1
     assert "进程已终止" in Path(result.stderr_path).read_text(encoding="utf-8")
+    basetemp_argument = next(
+        argument
+        for argument in result.resolved_command
+        if argument.startswith("--basetemp=")
+    )
+    assert not Path(basetemp_argument.split("=", 1)[1]).parent.exists()
+
+
+def test_execute_test_command_cleans_runtime_on_keyboard_interrupt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "test_sample.py").write_text(
+        "def test_value():\n    assert True\n",
+        encoding="utf-8",
+    )
+    runtime_path = tmp_path / "runtime"
+    runtime_path.mkdir()
+    process_state = {"killed": False, "cleaned": False}
+
+    class InterruptedProcess:
+        returncode = -1
+
+        def wait(self, timeout: float | None = None) -> int:
+            if not process_state["killed"]:
+                raise KeyboardInterrupt
+            return self.returncode
+
+        def kill(self) -> None:
+            process_state["killed"] = True
+
+        def poll(self) -> int | None:
+            return self.returncode if process_state["killed"] else None
+
+    monkeypatch.setattr(
+        "services.test_executor.start_test_runtime",
+        lambda **kwargs: SimpleNamespace(path=runtime_path),
+    )
+    monkeypatch.setattr(
+        "services.test_executor.subprocess.Popen",
+        lambda *args, **kwargs: InterruptedProcess(),
+    )
+    monkeypatch.setattr(
+        "services.test_executor.finish_test_runtime",
+        lambda runtime: process_state.update(cleaned=True),
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        execute_test_command(
+            repo_path=repo,
+            run_dir=tmp_path / "run",
+            command=python_pytest_command("-q", "test_sample.py"),
+            environment=current_environment(),
+            timeout=30,
+            tail_lines=20,
+            repair_round=1,
+            index=1,
+        )
+
+    assert process_state == {"killed": True, "cleaned": True}
+
+
+def test_execute_test_command_reports_runtime_cleanup_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "test_sample.py").write_text(
+        "def test_value():\n    assert True\n",
+        encoding="utf-8",
+    )
+
+    def report_cleanup_failure(runtime: RuntimeHandle) -> str:
+        finish_runtime(runtime)
+        return "无法清理测试临时目录：simulated cleanup failure"
+
+    monkeypatch.setattr(
+        "services.test_executor.finish_test_runtime",
+        report_cleanup_failure,
+    )
+
+    result = execute_test_command(
+        repo_path=repo,
+        run_dir=tmp_path / "run",
+        command=python_pytest_command("-q", "test_sample.py"),
+        environment=current_environment(),
+        timeout=30,
+        tail_lines=20,
+        repair_round=1,
+        index=1,
+    )
+
+    assert result.status == "ENVIRONMENT_ERROR"
+    assert result.failure.type == "ENVIRONMENT"
+    assert result.exit_code == -1
+    assert "无法清理测试临时目录" in result.output_tail
+
+
+def test_runtime_watchdog_cleans_after_parent_is_killed() -> None:
+    script = """
+import time
+from services.test_runtime import start_test_runtime
+
+runtime = start_test_runtime(run_name="killed-parent", repair_round=1, index=1)
+print(runtime.path, flush=True)
+time.sleep(60)
+"""
+    parent = subprocess.Popen(
+        [sys.executable, "-c", script],
+        cwd=PROJECT_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert parent.stdout is not None
+    runtime_path = Path(parent.stdout.readline().strip())
+
+    try:
+        assert runtime_path.is_dir()
+        parent.kill()
+        parent.wait(timeout=10)
+        deadline = time.monotonic() + 10
+        while runtime_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not runtime_path.exists()
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+            parent.wait(timeout=10)
 
 
 def test_execute_test_command_maps_rejected_command_to_environment_error(

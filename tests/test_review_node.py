@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from langgraph.errors import GraphRecursionError
 
+from config import Setting
 from nodes.review import build_review_node
 from schemas.coding_result import CodingResult
 from schemas.coding_task import CodingTask
@@ -81,7 +82,9 @@ def test_review_node_saves_round_result_and_enters_test(
     )
     assert artifact["payload"] == review_result.model_dump()
     assert "abc123" in agent.calls[0]["messages"][0]["content"]
-    assert agent.configs == [{"recursion_limit": 60}]
+    assert agent.configs == [
+        {"recursion_limit": Setting().AGENT_RECURSION_LIMIT}
+    ]
 
 
 @pytest.mark.parametrize(
@@ -110,11 +113,17 @@ def test_review_node_failure_logs_failure(
 
 
 def test_review_node_classifies_recursion_limit(tmp_path: Path) -> None:
+    recursion_limit = Setting().AGENT_RECURSION_LIMIT
     agent = FakeReviewAgent(
-        error=GraphRecursionError("Recursion limit of 60 reached")
+        error=GraphRecursionError(
+            f"Recursion limit of {recursion_limit} reached"
+        )
     )
 
     result = build_review_node(agent)(make_state(tmp_path))
 
     assert result["failure"].type == "LIMIT"
-    assert "Review Agent 达到最大执行步数 60" in result["failure"].message
+    assert (
+        f"Review Agent 达到最大执行步数 {recursion_limit}"
+        in result["failure"].message
+    )

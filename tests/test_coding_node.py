@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from langgraph.errors import GraphRecursionError
 
+from config import Setting
 from nodes import coding
 from schemas.coding_result import CodingResult
 from schemas.coding_task import CodingTask
@@ -136,7 +137,9 @@ def test_coding_node_saves_task_and_final_result_with_rsi(
     assert saved_result["index"] == 1
     assert saved_result["payload"]["success"] is True
     assert "修改 tracked.txt" in agents[0].calls[0]["messages"][0]["content"]
-    assert agents[0].configs == [{"recursion_limit": 60}]
+    assert agents[0].configs == [
+        {"recursion_limit": Setting().AGENT_RECURSION_LIMIT}
+    ]
 
 
 def test_coding_node_program_generates_error_and_rolls_back(
@@ -289,10 +292,13 @@ def test_coding_node_classifies_recursion_limit(
     git_repo: Path,
 ) -> None:
     run_dir = git_repo.parent / "coding-recursion-limit-run"
+    recursion_limit = Setting().AGENT_RECURSION_LIMIT
 
     class FailingAgent:
         def invoke(self, payload: dict, config: dict | None = None) -> dict:
-            raise GraphRecursionError("Recursion limit of 60 reached")
+            raise GraphRecursionError(
+                f"Recursion limit of {recursion_limit} reached"
+            )
 
     monkeypatch.setattr(
         coding,
@@ -305,7 +311,10 @@ def test_coding_node_classifies_recursion_limit(
     )
 
     assert result["failure"].type == "LIMIT"
-    assert "Coding Agent 达到最大执行步数 60" in result["failure"].message
+    assert (
+        f"Coding Agent 达到最大执行步数 {recursion_limit}"
+        in result["failure"].message
+    )
 
 
 def test_coding_node_stops_after_tenth_failed_patch(

@@ -10,6 +10,11 @@ from schemas.failure import make_failure
 from schemas.test_result import TestResult
 from services.artifacts import ensure_run_logs_directory
 from services.python_environment import build_environment_variables
+from services.test_runtime import (
+    TestRuntime,
+    finish_test_runtime,
+    start_test_runtime,
+)
 
 
 MAX_MODEL_OUTPUT_CHARS = 20_000
@@ -163,11 +168,16 @@ def execute_test_command(
     status = "ENVIRONMENT_ERROR"
     exit_code = -1
     resolved_arguments = [command]
+    runtime: TestRuntime | None = None
+    process: subprocess.Popen[bytes] | None = None
     with stdout_path.open("xb") as stdout_stream, stderr_path.open("xb") as stderr_stream:
         try:
-            runtime_dir = output_dir / (
-                f"test_runtime_r{repair_round:02d}_i{index:02d}"
+            runtime = start_test_runtime(
+                run_name=Path(run_dir).name,
+                repair_round=repair_round,
+                index=index,
             )
+            runtime_dir = runtime.path
             cache_dir = runtime_dir / "cache"
             arguments = resolve_pytest_command(
                 command,
@@ -203,12 +213,29 @@ def execute_test_command(
                     f"\n测试执行超过 {timeout:g} 秒，进程已终止。\n".encode("utf-8")
                 )
                 stderr_stream.flush()
+            except KeyboardInterrupt:
+                process.kill()
+                process.wait()
+                raise
             else:
                 exit_code = process.returncode
                 status = "PASSED" if exit_code == 0 else "FAILED"
         except (FileNotFoundError, OSError, ValueError) as exc:
             stderr_stream.write(f"测试环境错误：{exc}\n".encode("utf-8"))
             stderr_stream.flush()
+        finally:
+            if process is not None and process.poll() is None:
+                process.kill()
+                process.wait()
+            if runtime is not None:
+                cleanup_error = finish_test_runtime(runtime)
+                if cleanup_error:
+                    status = "ENVIRONMENT_ERROR"
+                    exit_code = -1
+                    stderr_stream.write(
+                        f"测试环境错误：{cleanup_error}\n".encode("utf-8")
+                    )
+                    stderr_stream.flush()
 
     if status == "FAILED":
         if _has_environment_error(stdout_path, stderr_path):
