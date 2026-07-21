@@ -158,7 +158,7 @@ def test_coordinator_prompt_requires_bounded_evidence_based_decisions() -> None:
     assert "不得扩展 Issue 的 acceptance_criteria" in (
         COORDINATOR_SYSTEM_PROMPT
     )
-    assert "逐项原样复制 Issue 的 acceptance_criteria" in (
+    assert "程序会以 IssueSpec 中的条件覆盖该字段" in (
         COORDINATOR_SYSTEM_PROMPT
     )
     assert "互相矛盾的断言" in COORDINATOR_SYSTEM_PROMPT
@@ -306,12 +306,12 @@ def test_coordinator_node_builds_coding_task_after_explore() -> None:
     }
 
 
-def test_coordinator_rejects_expanded_acceptance_criteria() -> None:
+def test_coordinator_overrides_model_acceptance_criteria_from_issue() -> None:
     task = make_coding_task().model_copy(
         update={
             "acceptance_criteria": [
-                "空结果返回空列表",
                 "旧测试要求返回 500",
+                "为所有子类补充测试",
             ]
         }
     )
@@ -331,9 +331,37 @@ def test_coordinator_rejects_expanded_acceptance_criteria() -> None:
         }
     )
 
+    assert result["next_action"] == "CODE"
+    assert result["coding_task"].acceptance_criteria == [
+        "空结果返回空列表"
+    ]
+    assert task.acceptance_criteria == [
+        "旧测试要求返回 500",
+        "为所有子类补充测试",
+    ]
+
+
+def test_coordinator_rejects_issue_without_acceptance_criteria() -> None:
+    issue = make_issue().model_copy(update={"acceptance_criteria": []})
+    agent = FakeCoordinatorAgent(
+        result=CoordinatorDecision(
+            next_action="CODE",
+            current_summary="根因已明确，进入修改",
+            coding_task=make_coding_task(),
+        )
+    )
+
+    result = build_coordinator_node(agent)(
+        {
+            "issue": issue,
+            "cycle": 0,
+            "explore_reports": [make_report()],
+        }
+    )
+
     assert result["status"] == "FAILED"
-    assert result["failure"].type == "MODEL"
-    assert "逐项原样继承" in result["failure"].message
+    assert result["failure"].type == "INPUT"
+    assert "缺少可以安全确定的验收条件" in result["failure"].message
 
 
 def test_coordinator_forces_code_after_explore_budget_is_used() -> None:

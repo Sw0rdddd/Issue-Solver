@@ -2,6 +2,9 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
+from nodes import finalize
 from nodes.finalize import build_finalize_node
 from schemas.failure import make_failure
 from schemas.review_result import ReviewResult
@@ -87,6 +90,8 @@ def test_finalize_saves_patch_only_after_review_and_tests_pass(
 
     assert result["status"] == "FINISHED"
     assert result["diff_path"] == str(run_dir / "diff.patch")
+    assert result["rollback_required"] is False
+    assert result["rollback_success"] is False
     assert (run_dir / "diff.patch").is_file()
     artifact = json.loads(
         (run_dir / "logs" / "finalize_result_r01.json").read_text(
@@ -94,6 +99,7 @@ def test_finalize_saves_patch_only_after_review_and_tests_pass(
         )
     )
     assert artifact["payload"]["status"] == "FINISHED"
+    assert artifact["payload"]["rollback_success"] is False
 
 
 def test_finalize_rolls_back_when_limit_requires_it(git_repo: Path) -> None:
@@ -112,6 +118,8 @@ def test_finalize_rolls_back_when_limit_requires_it(git_repo: Path) -> None:
 
     assert result["status"] == "FAILED"
     assert result["changed_files"] == []
+    assert result["rollback_required"] is True
+    assert result["rollback_success"] is True
     assert git_output(git_repo, "status", "--porcelain") == ""
     artifact = json.loads(
         (run_dir / "logs" / "finalize_result_r01.json").read_text(
@@ -119,3 +127,62 @@ def test_finalize_rolls_back_when_limit_requires_it(git_repo: Path) -> None:
         )
     )
     assert artifact["payload"]["rollback_success"] is True
+
+
+def test_finalize_reports_when_no_changes_need_rollback(tmp_path: Path) -> None:
+    run_dir = tmp_path / "finalize-no-changes"
+    result = build_finalize_node()(
+        {
+            "next_action": "FAILED",
+            "status": "FAILED",
+            "run_dir": str(run_dir),
+            "repair_round": 1,
+            "failure": make_failure("MODEL", "Coordinator 输出无效"),
+        }
+    )
+
+    assert result["status"] == "FAILED"
+    assert result["changed_files"] == []
+    assert result["rollback_required"] is False
+    assert result["rollback_success"] is False
+    artifact = json.loads(
+        (run_dir / "logs" / "finalize_result_r01.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert artifact["payload"]["rollback_required"] is False
+    assert artifact["payload"]["rollback_success"] is False
+
+
+def test_finalize_reports_rollback_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    rollback_failure = make_failure("SAFETY", "HEAD 已发生变化")
+    monkeypatch.setattr(
+        finalize,
+        "rollback_state_to_base",
+        lambda state, failure: {
+            "success": False,
+            "failure": rollback_failure,
+            "data": {},
+        },
+    )
+
+    result = build_finalize_node()(
+        {
+            "next_action": "FAILED",
+            "status": "FAILED",
+            "run_dir": str(tmp_path / "finalize-rollback-failure"),
+            "repair_round": 1,
+            "rollback_required": True,
+            "changed_files": ["tracked.txt"],
+            "failure": make_failure("LIMIT", "达到最大循环次数 5"),
+        }
+    )
+
+    assert result["status"] == "FAILED"
+    assert result["rollback_required"] is True
+    assert result["rollback_success"] is False
+    assert result["rollback_failure"] == rollback_failure
+    assert result["changed_files"] == ["tracked.txt"]

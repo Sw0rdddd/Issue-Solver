@@ -98,6 +98,7 @@ class ResolverState(TypedDict):
 
     # 失败收尾策略
     rollback_required: NotRequired[bool]
+    rollback_success: NotRequired[bool]
     rollback_failure: NotRequired[FailureInfo]
 
     # 节点执行失败时写入

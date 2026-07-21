@@ -258,13 +258,22 @@ def build_coordinator_node(coordinator_agent: Any):
                     raise ClassifiedFailure(
                         make_failure("MODEL", "CODE 决策缺少 CodingTask。")
                     )
-                if coding_task.acceptance_criteria != issue.acceptance_criteria:
+                acceptance_criteria = [
+                    criterion.strip()
+                    for criterion in issue.acceptance_criteria
+                    if criterion.strip()
+                ]
+                if not acceptance_criteria:
                     raise ClassifiedFailure(
                         make_failure(
-                            "MODEL",
-                            "CodingTask.acceptance_criteria 必须逐项原样继承 Issue。",
+                            "INPUT",
+                            "Issue 缺少可以安全确定的验收条件。",
+                            "请补充明确的期望行为后重试。",
                         )
                     )
+                coding_task = coding_task.model_copy(
+                    update={"acceptance_criteria": acceptance_criteria}
+                )
                 missing_scope = [
                     path
                     for path in existing_files

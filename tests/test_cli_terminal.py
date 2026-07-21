@@ -206,6 +206,66 @@ def test_reporter_displays_review_test_and_finalize_results() -> None:
     assert "E:/runs/run_test/final.patch" in text
 
 
+def test_reporter_distinguishes_finalize_workspace_outcomes() -> None:
+    output = StringIO()
+    reporter = TerminalReporter(stdout=output, width=72)
+
+    reporter.handle_update(
+        "finalize",
+        {
+            "status": "FAILED",
+            "rollback_required": False,
+            "rollback_success": False,
+            "changed_files": [],
+        },
+    )
+    reporter.handle_update(
+        "finalize",
+        {
+            "status": "FAILED",
+            "rollback_required": True,
+            "rollback_success": True,
+            "changed_files": [],
+        },
+    )
+    reporter.handle_update(
+        "finalize",
+        {
+            "status": "FAILED",
+            "rollback_required": False,
+            "rollback_success": False,
+            "changed_files": ["tracked.txt"],
+        },
+    )
+
+    text = output.getvalue()
+    assert "未产生修改，无需回滚" in text
+    assert "失败修改已回滚到 base commit" in text
+    assert "失败修改已保留，等待回滚决定" in text
+
+
+def test_reporter_displays_rollback_failure() -> None:
+    output = StringIO()
+    reporter = TerminalReporter(stdout=output, width=72)
+
+    reporter.handle_update(
+        "finalize",
+        {
+            "status": "FAILED",
+            "rollback_required": True,
+            "rollback_success": False,
+            "failure": make_failure("LIMIT", "达到最大循环次数 5"),
+            "rollback_failure": make_failure("SAFETY", "HEAD 已发生变化"),
+            "changed_files": ["tracked.txt"],
+        },
+    )
+
+    text = output.getvalue()
+    assert "✗ Finalize 失败" in text
+    assert "HEAD 已发生变化" in text
+    assert "达到最大循环次数" not in text
+
+
 def test_reporter_compacts_targets_from_multiple_test_files() -> None:
     output = StringIO()
     reporter = TerminalReporter(stdout=output, width=72)

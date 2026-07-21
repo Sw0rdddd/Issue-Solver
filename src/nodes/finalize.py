@@ -50,6 +50,7 @@ def build_finalize_node():
         outcome: dict = {
             "next_action": state.get("next_action"),
             "rollback_required": state.get("rollback_required", False),
+            "rollback_success": False,
         }
 
         try:
@@ -87,6 +88,8 @@ def build_finalize_node():
                     "phase": "FINALIZE",
                     "status": "FINISHED",
                     "diff_path": saved["data"]["patch_path"],
+                    "rollback_required": False,
+                    "rollback_success": False,
                 }
 
             if state.get("rollback_required"):
@@ -108,6 +111,8 @@ def build_finalize_node():
                         "phase": "FINALIZE",
                         "status": "FAILED",
                         "failure": failure,
+                        "rollback_required": True,
+                        "rollback_success": False,
                         "rollback_failure": rollback_failure,
                         "changed_files": state.get("changed_files", []),
                     }
@@ -144,6 +149,8 @@ def build_finalize_node():
             return {
                 "phase": "FINALIZE",
                 "status": "FAILED",
+                "rollback_required": state.get("rollback_required", False),
+                "rollback_success": outcome["rollback_success"],
                 "changed_files": changed_files,
             }
 
@@ -151,6 +158,8 @@ def build_finalize_node():
             return {
                 "phase": "FINALIZE",
                 "status": "FAILED",
+                "rollback_required": state.get("rollback_required", False),
+                "rollback_success": False,
                 "failure": failure_from_exception(
                     exc,
                     "INTERNAL",

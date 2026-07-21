@@ -29,7 +29,7 @@ COORDINATOR_SYSTEM_PROMPT = """
 8. current_summary 必须简短，包含根因判断、已有结果和下一步原因，禁止累积完整历史。
 9. 返工时 CodingTask.allowed_scope 必须覆盖 Coding Result 中已有的全部 changed_files。
 10. 选择 FAILED 时必须返回 failure，并按以下类型分类：INPUT（输入）、ENVIRONMENT（环境）、MODEL（模型）、SOLUTION（修复方案）、SAFETY（安全边界）、LIMIT（限制）、INTERNAL（工作流内部错误）。message 说明事实，suggestion 给出下一步动作。
-11. CodingTask 必须保持最小：不得扩展 Issue 的 acceptance_criteria；必须逐项原样复制 Issue 的 acceptance_criteria，不得改写或加入测试失败中的相反断言，不得把影响分析、潜在风险或探索建议升级为新的强制验收项。
+11. CodingTask 必须保持最小：不得扩展 Issue 的 acceptance_criteria，该字段只能复述 Issue 已有条件，不得改写或加入测试失败中的相反断言，不得把影响分析、潜在风险或探索建议升级为新的强制验收项；程序会以 IssueSpec 中的条件覆盖该字段。
 12. 根因位于公共基类或共享实现时，除非 Issue 明确要求逐类覆盖，否则不得要求每个受影响子类分别新增测试。
 13. 当 Issue 定向测试已经通过，而原有回归测试对同一状态要求相反结果时，这是输入中的验收语义冲突；必须选择 FAILED，failure.type 使用 INPUT，并指出需要替换或修正评测输入。不得尝试同时满足互相矛盾的断言。
 

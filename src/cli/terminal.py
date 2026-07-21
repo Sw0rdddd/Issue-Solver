@@ -439,12 +439,26 @@ class TerminalReporter:
         if update.get("status") == "FINISHED":
             self._progress(f"✓ Finalize · {elapsed:.2f} 秒")
             self._detail("最终 Patch", update.get("diff_path", "未知路径"))
-        elif update.get("changed_files") == []:
+        elif update.get("rollback_success"):
             self._progress(f"✓ Finalize · {elapsed:.2f} 秒")
             self._detail("工作区", "失败修改已回滚到 base commit")
+        elif (
+            not update.get("rollback_required")
+            and not update.get("changed_files")
+        ):
+            self._progress(f"✓ Finalize · {elapsed:.2f} 秒")
+            self._detail("工作区", "未产生修改，无需回滚")
+        elif not update.get("rollback_required"):
+            self._progress(f"✓ Finalize · {elapsed:.2f} 秒")
+            self._detail("工作区", "失败修改已保留，等待回滚决定")
         else:
             self._progress(f"✗ Finalize 失败 · {elapsed:.2f} 秒")
-            self._show_failure(update)
+            self._show_failure(
+                {
+                    "failure": update.get("rollback_failure")
+                    or update.get("failure")
+                }
+            )
 
     def report_completed(self, result: ReportResult) -> None:
         elapsed = self._duration("report")

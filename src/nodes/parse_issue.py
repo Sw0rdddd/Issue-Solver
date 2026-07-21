@@ -6,8 +6,8 @@ from prompts.issue_parser import (
     ISSUE_PARSER_SYSTEM_PROMPT,
     build_issue_parser_input,
 )
+from schemas.failure import failure_from_exception, make_failure
 from schemas.issue_specification import IssueSpec
-from schemas.failure import failure_from_exception
 from services.artifacts import ensure_run_logs_directory
 from services.issue_loader import load_issue
 from services.structured_output import with_structured_output_retry
@@ -72,6 +72,24 @@ def build_parse_issue_node(model: BaseChatModel):
                         prefix="Issue 解析失败：",
                     ),
                 }
+
+            acceptance_criteria = [
+                criterion.strip()
+                for criterion in issue.acceptance_criteria
+                if criterion.strip()
+            ]
+            if not acceptance_criteria:
+                return {
+                    "status": "FAILED",
+                    "failure": make_failure(
+                        "INPUT",
+                        "Issue 缺少可以安全确定的验收条件。",
+                        "请补充明确的期望行为后重试。",
+                    ),
+                }
+            issue = issue.model_copy(
+                update={"acceptance_criteria": acceptance_criteria}
+            )
 
             # 4. 保存规范化后的 Issue
             issue_path = (
