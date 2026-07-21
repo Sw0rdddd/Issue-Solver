@@ -7,7 +7,7 @@
 - Python 3.13+；
 - 目标目录是已有提交的 Git 仓库，且工作区干净；
 - 开发者已在目标仓库根目录准备好唯一的 `.venv`、`venv` 或 `.conda`，并安装目标项目、pytest 及全部测试依赖；
-- 在本项目根目录 `.env` 配置 `API_KEY`、`BASE_URL` 和 `MODEL_NAME`。
+- 在本项目根目录 `.env` 配置 OpenAI Chat Completions 兼容服务的 `API_KEY`、`BASE_URL` 和 `MODEL_NAME`。
 
 工具不会创建虚拟环境、安装依赖，也不会读取目标仓库的 `.env`。即使目标仓库存在 `tox.ini`，工具也不会调用 tox 或使用其环境矩阵，而是始终在上述已准备好的环境中直接执行 `python -m pytest`。仅能通过 tox 完成环境准备或测试编排的项目暂不支持。
 
@@ -87,6 +87,8 @@ issue-solver run --issue <issue-url-or-text>
 ## 配置与产物
 
 - 配置文件始终是本项目根目录的 `.env`；
+- 模型接口使用 OpenAI Chat Completions 格式；程序优先根据 `MODEL_NAME`、其次根据 `BASE_URL` 自动识别供应商；
+- `REASONING_HISTORY=auto` 会为 DeepSeek、GLM、Kimi 和 MiMo 回填多轮工具调用所需的 `reasoning_content`，OpenAI、Gemini、Qwen 和未知服务默认不回填；必要时可设为 `true` 或 `false` 强制覆盖，Qwen 设为 `true` 时也会发送 `preserve_thinking=true`；
 - 两种命令的运行记录默认都位于 `.issue-solver-runs/<repo>/<run-id>/`；
 - 详细 JSON、audit、测试输出和运行时目录统一保存在 `run-id/logs/`；
 - `report.md` 与最终 `diff.patch`、`diff.json` 保留在 `run-id/` 根部；模型总结不可用时自动使用程序模板；

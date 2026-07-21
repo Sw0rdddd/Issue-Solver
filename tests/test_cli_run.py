@@ -46,7 +46,7 @@ def prepare_runtime(
     )
     monkeypatch.setattr(
         run_module,
-        "ReasoningChatDeepSeek",
+        "build_chat_model",
         model_constructor,
     )
     monkeypatch.setattr(
@@ -382,6 +382,9 @@ def test_run_streams_graph_with_initial_state_and_progress(
         "coding_stage_call": 0,
     }
     assert model_constructor.call_args.kwargs["model"] == "test-model"
+    assert model_constructor.call_args.kwargs["reasoning_history_mode"] == (
+        setting.REASONING_HISTORY
+    )
     compiled_graph.invoke.assert_not_called()
 
     output = capsys.readouterr().out

@@ -24,6 +24,9 @@ def test_setting_reflects_loaded_environment() -> None:
     assert setting.API_KEY == os.environ.get("API_KEY")
     assert setting.BASE_URL == os.environ.get("BASE_URL")
     assert setting.MODEL_NAME == os.environ.get("MODEL_NAME")
+    assert setting.REASONING_HISTORY == os.environ.get(
+        "REASONING_HISTORY", "auto"
+    ).strip().lower()
     assert setting.MAX_CYCLES == int(os.environ.get("MAX_CYCLES", "5"))
     assert setting.TEST_TIMEOUT == float(os.environ.get("TEST_TIMEOUT", "300"))
     assert setting.TEST_TAIL_LINES == int(
@@ -39,6 +42,7 @@ def test_setting_reads_runtime_overrides(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("TEST_TIMEOUT", "12.5")
     monkeypatch.setenv("TEST_TAIL_LINES", "42")
     monkeypatch.setenv("RUN_ROOT", "custom-runs")
+    monkeypatch.setenv("REASONING_HISTORY", "TRUE")
 
     setting = Setting()
 
@@ -46,6 +50,7 @@ def test_setting_reads_runtime_overrides(monkeypatch: pytest.MonkeyPatch) -> Non
     assert setting.TEST_TIMEOUT == 12.5
     assert setting.TEST_TAIL_LINES == 42
     assert setting.RUN_ROOT == Path("custom-runs")
+    assert setting.REASONING_HISTORY == "true"
 
 
 @pytest.mark.parametrize(
@@ -55,6 +60,7 @@ def test_setting_reads_runtime_overrides(monkeypatch: pytest.MonkeyPatch) -> Non
         ("TEST_TIMEOUT", "not-a-number"),
         ("TEST_TAIL_LINES", "-1"),
         ("RUN_ROOT", "   "),
+        ("REASONING_HISTORY", "yes"),
     ],
 )
 def test_setting_rejects_invalid_values(

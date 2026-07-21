@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Literal, cast
 
 from dotenv import load_dotenv
 
@@ -38,6 +39,15 @@ def _positive_float(name: str, default: float) -> float:
     return value
 
 
+def _reasoning_history_mode() -> Literal["auto", "true", "false"]:
+    value = os.environ.get("REASONING_HISTORY", "auto").strip().lower()
+    if value not in {"auto", "true", "false"}:
+        raise ValueError(
+            "配置 REASONING_HISTORY 必须是 auto、true 或 false。"
+        )
+    return cast(Literal["auto", "true", "false"], value)
+
+
 class Setting:
     """统一读取本项目 .env 覆盖后的运行配置。"""
 
@@ -45,6 +55,7 @@ class Setting:
         self.API_KEY = _optional_text("API_KEY")
         self.BASE_URL = _optional_text("BASE_URL")
         self.MODEL_NAME = _optional_text("MODEL_NAME")
+        self.REASONING_HISTORY = _reasoning_history_mode()
         self.GITHUB_TOKEN = _optional_text("GITHUB_TOKEN")
         self.MAX_CYCLES = _positive_int("MAX_CYCLES", 5)
         self.TEST_TIMEOUT = _positive_float("TEST_TIMEOUT", 300.0)

@@ -14,7 +14,7 @@ from schemas.failure import (
     make_failure,
 )
 from services.artifacts import write_round_artifact, write_run_artifact
-from services.deepseek_model import ReasoningChatDeepSeek
+from services.openai_compatible_model import build_chat_model
 from services.python_environment import discover_python_environment
 from services.repository import find_repo_root
 from services.run_store import create_run_id
@@ -291,10 +291,11 @@ def run_command(
             raise ClassifiedFailure(
                 make_failure("ENVIRONMENT", "配置 BASE_URL 不能为空。")
             )
-        model = ReasoningChatDeepSeek(
+        model = build_chat_model(
             model=model_name,
             api_key=setting.API_KEY,
             base_url=setting.BASE_URL,
+            reasoning_history_mode=setting.REASONING_HISTORY,
         )
         graph = build_graph(model).compile()
 
