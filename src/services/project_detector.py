@@ -55,7 +55,17 @@ def detect_test_commands(repo_path: Path) -> list[str]:
     if (repo_path / "tests").is_dir():
         return ["pytest -q"]
 
-    if (repo_path / "tox.ini").exists():
+    tox_path = repo_path / "tox.ini"
+
+    if tox_path.exists():
+        content = tox_path.read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+
+        if any(line.strip() == "[pytest]" for line in content.splitlines()):
+            return ["pytest -q"]
+
         raise RuntimeError(
             "检测到 tox.ini，但未检测到可直接运行的 pytest 配置或 tests 目录；"
             "本工具不会调用 tox、创建虚拟环境或安装依赖。请开发者先准备"

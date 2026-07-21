@@ -78,5 +78,15 @@ def test_tests_directory_has_priority_over_tox(tmp_path: Path) -> None:
     assert detect_test_commands(tmp_path) == ["pytest -q"]
 
 
+def test_detects_pytest_configuration_in_tox_ini(tmp_path: Path) -> None:
+    (tmp_path / "testing").mkdir()
+    (tmp_path / "tox.ini").write_text(
+        "[tox]\n\n[pytest]\ntestpaths = testing\n",
+        encoding="utf-8",
+    )
+
+    assert detect_test_commands(tmp_path) == ["pytest -q"]
+
+
 def test_returns_no_test_commands_without_markers(tmp_path: Path) -> None:
     assert detect_test_commands(tmp_path) == []

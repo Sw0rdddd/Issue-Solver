@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import venv
@@ -5,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from schemas.environment_info import EnvironmentInfo
+from services import python_environment
 from services.python_environment import (
     build_environment_variables,
     discover_python_environment,
@@ -50,6 +53,60 @@ def test_discovers_repo_venv_and_validates_pytest(git_repo: Path) -> None:
     assert Path(result.root_path) == (git_repo / ".venv").resolve()
     assert result.pytest_version.startswith("pytest")
     assert (run_dir / "logs" / "environment_runtime" / "tmp").is_dir()
+
+
+def test_discovers_repo_conda_with_platform_python(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = git_repo / ".conda"
+    (root / "conda-meta").mkdir(parents=True)
+    python = root / ("python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True, exist_ok=True)
+    python.touch()
+    calls: list[list[str]] = []
+
+    def fake_run(arguments: list[str], **kwargs: object):
+        calls.append(arguments)
+        if arguments[:2] == ["git", "check-ignore"]:
+            return subprocess.CompletedProcess(arguments, 0)
+        if arguments[0] != str(python.resolve()):
+            raise AssertionError(f"使用了错误的解释器：{arguments[0]}")
+        if arguments[1] == "-c":
+            payload = {
+                "executable": str(python.resolve()),
+                "prefix": str(root.resolve()),
+            }
+            return subprocess.CompletedProcess(
+                arguments,
+                0,
+                stdout=json.dumps(payload),
+                stderr="",
+            )
+        if arguments[1:] == ["-m", "pytest", "--version"]:
+            return subprocess.CompletedProcess(
+                arguments,
+                0,
+                stdout="pytest test",
+                stderr="",
+            )
+        raise AssertionError(f"意外的命令：{arguments}")
+
+    monkeypatch.setattr(python_environment.subprocess, "run", fake_run)
+
+    result = discover_python_environment(git_repo, git_repo.parent / "run")
+
+    assert result.kind == "CONDA"
+    assert result.source == ".conda"
+    assert result.python_executable == str(python.resolve())
+    assert result.pytest_version == "pytest test"
+    assert [call[1:] for call in calls if call[0] == str(python.resolve())] == [
+        [
+            "-c",
+            "import json,sys; print(json.dumps({'executable':sys.executable,'prefix':sys.prefix}))",
+        ],
+        ["-m", "pytest", "--version"],
+    ]
 
 
 def test_missing_repo_environment_does_not_fallback_to_active_python(
@@ -99,3 +156,27 @@ def test_build_environment_variables_uses_run_directory(
     first_path = Path(values["PATH"].split(os.pathsep)[0])
     expected = Path(info.root_path) / ("Scripts" if os.name == "nt" else "bin")
     assert first_path == expected
+
+
+def test_build_environment_variables_uses_conda_prefix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / ".conda"
+    python = root / ("python.exe" if os.name == "nt" else "bin/python")
+    info = EnvironmentInfo(
+        kind="CONDA",
+        root_path=str(root),
+        python_executable=str(python),
+        pytest_version="pytest test",
+        source=".conda",
+    )
+    monkeypatch.setenv("VIRTUAL_ENV", "active-venv")
+
+    values = build_environment_variables(info, tmp_path / "runtime")
+
+    assert values["CONDA_PREFIX"] == str(root)
+    assert "VIRTUAL_ENV" not in values
+    path_entries = values["PATH"].split(os.pathsep)
+    expected_first = root if os.name == "nt" else root / "bin"
+    assert Path(path_entries[0]) == expected_first

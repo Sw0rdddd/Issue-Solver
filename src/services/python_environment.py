@@ -81,8 +81,12 @@ def build_environment_variables(
     return values
 
 
-def _python_path(root: Path) -> Path:
-    return root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+def _python_path(root: Path, kind: str) -> Path:
+    if os.name != "nt":
+        return root / "bin/python"
+    if kind == "CONDA":
+        return root / "python.exe"
+    return root / "Scripts/python.exe"
 
 
 def discover_python_environment(
@@ -116,7 +120,7 @@ def discover_python_environment(
     marker = resolved / ("conda-meta" if kind == "CONDA" else "pyvenv.cfg")
     if not marker.exists():
         raise RuntimeError(f"目标虚拟环境缺少标识文件：{marker}")
-    python = _python_path(resolved)
+    python = _python_path(resolved, kind)
     if not python.is_file():
         raise RuntimeError(f"目标虚拟环境缺少 Python 解释器：{python}")
 
