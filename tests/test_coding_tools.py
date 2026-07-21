@@ -146,6 +146,144 @@ def test_apply_patch_modifies_real_file_and_inspects_diff(
     assert not (context.run_dir / "diff.patch").exists()
 
 
+def test_apply_patch_handles_hidden_crlf_without_touching_other_files(
+    git_repo: Path,
+) -> None:
+    run_git(git_repo, "config", "core.autocrlf", "false")
+    untouched = git_repo / "untouched.txt"
+    untouched.write_bytes(b"untouched\n")
+    run_git(git_repo, "add", "untouched.txt")
+    run_git(
+        git_repo,
+        "-c",
+        "user.name=Issue Solver Tests",
+        "-c",
+        "user.email=tests@example.com",
+        "commit",
+        "-m",
+        "add untouched file",
+    )
+
+    tracked = git_repo / "tracked.txt"
+    tracked.write_bytes(b"initial\r\n")
+    untouched.write_bytes(b"untouched\r\n")
+    run_git(
+        git_repo,
+        "update-index",
+        "--assume-unchanged",
+        "tracked.txt",
+        "untouched.txt",
+    )
+    assert run_git(git_repo, "status", "--porcelain") == ""
+
+    context = make_context(git_repo, allowed_paths=["tracked.txt"])
+    applied = tools_by_name(context)["apply_patch"].invoke(
+        {"patch": modify_patch()}
+    )
+    inspected = inspect_coding_changes(context)
+
+    assert applied["success"] is True
+    assert tracked.read_bytes() == b"changed\n"
+    assert untouched.read_bytes() == b"untouched\r\n"
+    assert inspected["success"] is True
+    assert inspected["data"]["changed_files"] == ["tracked.txt"]
+
+    rolled_back = rollback_to_base(
+        context,
+        make_failure("LIMIT", "模拟失败"),
+    )
+
+    assert rolled_back["success"] is True
+    assert rolled_back["data"]["changed_files"] == ["tracked.txt"]
+    assert tracked.read_bytes() == b"initial\n"
+    assert untouched.read_bytes() == b"untouched\r\n"
+
+
+def test_apply_patch_keeps_strict_indentation_matching(git_repo: Path) -> None:
+    source = git_repo / "src" / "module.py"
+    source.parent.mkdir()
+    source.write_text("if ready:\n    run()\n", encoding="utf-8")
+    run_git(git_repo, "add", "src/module.py")
+    run_git(
+        git_repo,
+        "-c",
+        "user.name=Issue Solver Tests",
+        "-c",
+        "user.email=tests@example.com",
+        "commit",
+        "-m",
+        "add module",
+    )
+    context = make_context(git_repo, allowed_paths=["src/module.py"])
+    patch = """diff --git a/src/module.py b/src/module.py
+--- a/src/module.py
++++ b/src/module.py
+@@ -1,2 +1,2 @@
+ if ready:
+-        run()
++        execute()
+"""
+
+    result = tools_by_name(context)["apply_patch"].invoke({"patch": patch})
+
+    assert result["success"] is False
+    assert "Patch 无法应用" in result["failure"]["message"]
+    assert source.read_text(encoding="utf-8") == "if ready:\n    run()\n"
+
+
+def test_apply_patch_preserves_mixed_git_eol_rules(git_repo: Path) -> None:
+    run_git(git_repo, "config", "core.autocrlf", "false")
+    run_git(git_repo, "checkout", "--", "tracked.txt")
+    (git_repo / ".gitattributes").write_text(
+        "crlf.txt text eol=crlf\nlf.txt text eol=lf\n",
+        encoding="utf-8",
+    )
+    (git_repo / "crlf.txt").write_text("before\n", encoding="utf-8")
+    (git_repo / "lf.txt").write_text("before\n", encoding="utf-8")
+    run_git(git_repo, "add", ".gitattributes", "crlf.txt", "lf.txt")
+    run_git(
+        git_repo,
+        "-c",
+        "user.name=Issue Solver Tests",
+        "-c",
+        "user.email=tests@example.com",
+        "commit",
+        "-m",
+        "add mixed eol files",
+    )
+    (git_repo / "crlf.txt").unlink()
+    (git_repo / "lf.txt").unlink()
+    run_git(git_repo, "checkout", "--", "crlf.txt", "lf.txt")
+    assert (git_repo / "crlf.txt").read_bytes() == b"before\r\n"
+    assert (git_repo / "lf.txt").read_bytes() == b"before\n"
+
+    context = make_context(
+        git_repo,
+        allowed_paths=["crlf.txt", "lf.txt"],
+    )
+    patch = """diff --git a/crlf.txt b/crlf.txt
+--- a/crlf.txt
++++ b/crlf.txt
+@@ -1 +1 @@
+-before
++after
+diff --git a/lf.txt b/lf.txt
+--- a/lf.txt
++++ b/lf.txt
+@@ -1 +1 @@
+-before
++after
+"""
+
+    result = tools_by_name(context)["apply_patch"].invoke({"patch": patch})
+    inspected = inspect_coding_changes(context)
+
+    assert result["success"] is True
+    assert (git_repo / "crlf.txt").read_bytes() == b"after\r\n"
+    assert (git_repo / "lf.txt").read_bytes() == b"after\n"
+    assert inspected["data"]["changed_files"] == ["crlf.txt", "lf.txt"]
+
+
 @pytest.mark.parametrize(
     ("patch", "expected_paths"),
     [

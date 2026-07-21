@@ -180,7 +180,7 @@ Coordinator 下发的 `CodingTask.allowed_scope` 会被固化为 `CodingToolCont
 - 默认保护 `.git`、虚拟环境、缓存、构建目录、`node_modules` 和运行产物目录；
 - 拒绝二进制 Patch、文件权限/类型变更、submodule、被 Git ignore 的新文件；
 - 限制单 Patch 最多修改 20 个文件、文本文件最大 1 MiB、Patch 最大 100,000 字符；
-- 在应用前执行 `git apply --check`，应用后重新捕获相对基线的实际 Git 快照；
+- 通过临时 Git index 严格校验并应用 Patch，仅将目标路径写回工作区，遵循 `.gitattributes` 的行尾规则，避免 CRLF 差异牵连无关文件；
 - 若 Patch 已部分应用后发现验证失败，则恢复这一次 Patch 前的文件状态。
 
 模型生成的 Patch 始终作为不可信输入处理。工具会保留原文，并单独生成送给 Git 的规范化版本；只允许统一换行、移除包裹整个 Patch 的 Markdown 围栏、根据 hunk 内容重算行数以及补齐末尾换行。工具不会 URL 解码、替换全角字符、猜测或改写路径。原始 Patch、规范化 Patch、两者哈希和规范化动作都会写入 Coding audit，随后仍须通过路径范围、文件类型和 `git apply --check` 等全部程序校验。

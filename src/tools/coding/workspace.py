@@ -2,12 +2,14 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Iterator
 
 from langchain.tools import tool
 
@@ -189,12 +191,22 @@ def _extract_patch_paths(
     if result.returncode != 0:
         raise ValueError(f"Patch 格式无效：{_git_error(result)}")
 
+    parsed_paths = {
+        path
+        for record in _parse_numstat(result.stdout)
+        for path in record
+    }
+    patch_text = patch_bytes.decode("utf-8")
+    parsed_paths.update(
+        match.group(1)
+        for match in re.finditer(
+            r"^rename (?:from|to) (.+)$",
+            patch_text,
+            re.MULTILINE,
+        )
+    )
     paths = sorted(
-        {
-            _validate_scoped_path(context, path)
-            for record in _parse_numstat(result.stdout)
-            for path in record
-        }
+        _validate_scoped_path(context, path) for path in parsed_paths
     )
     if not paths:
         raise ValueError("Patch 未包含任何文件修改。")
@@ -424,6 +436,122 @@ def _temporary_index_environment(
     return env
 
 
+@contextmanager
+def _temporary_worktree_index(
+    context: CodingToolContext,
+    *,
+    refresh_paths: list[str] | None = None,
+) -> Iterator[dict[str, str]]:
+    staged = _run_git_bytes(
+        context,
+        ["diff", "--cached", "--quiet", context.base_commit, "--"],
+    )
+    if staged.returncode == 1:
+        raise ClassifiedFailure(
+            make_failure("SAFETY", "Git index 已在 Coding 期间发生变化。")
+        )
+    if staged.returncode != 0:
+        raise ClassifiedFailure(
+            make_failure("INTERNAL", f"无法验证 Git index：{_git_error(staged)}")
+        )
+
+    index_result = _run_git_bytes(
+        context,
+        ["rev-parse", "--git-path", "index"],
+    )
+    if index_result.returncode != 0:
+        raise ClassifiedFailure(
+            make_failure(
+                "ENVIRONMENT",
+                f"无法定位 Git index：{_git_error(index_result)}",
+            )
+        )
+    index_path = Path(index_result.stdout.decode("utf-8").strip())
+    if not index_path.is_absolute():
+        index_path = context.repo_root / index_path
+
+    with tempfile.TemporaryDirectory(dir=context.run_dir) as temporary:
+        env = _temporary_index_environment(context, temporary)
+        try:
+            shutil.copyfile(index_path, env["GIT_INDEX_FILE"])
+        except OSError as exc:
+            raise ClassifiedFailure(
+                make_failure("ENVIRONMENT", f"无法复制 Git index：{exc}")
+            ) from exc
+
+        paths_to_refresh = sorted(
+            set(_audited_touched_files(context))
+            | set(refresh_paths or [])
+        )
+        tracked_paths: list[str] = []
+        for relative in paths_to_refresh:
+            target = context.repo_root / Path(*PurePosixPath(relative).parts)
+            if not target.is_file() or target.is_symlink():
+                continue
+            tracked = _run_git_bytes(
+                context,
+                ["ls-files", "--error-unmatch", "--", relative],
+                env=env,
+            )
+            if tracked.returncode == 0:
+                tracked_paths.append(relative)
+            elif tracked.returncode != 1:
+                raise ClassifiedFailure(
+                    make_failure(
+                        "INTERNAL",
+                        f"无法检查临时 index 路径：{_git_error(tracked)}",
+                    )
+                )
+
+        if tracked_paths:
+            flags = _run_git_bytes(
+                context,
+                [
+                    "update-index",
+                    "--no-assume-unchanged",
+                    "--no-skip-worktree",
+                    "--",
+                    *tracked_paths,
+                ],
+                env=env,
+            )
+            if flags.returncode != 0:
+                raise ClassifiedFailure(
+                    make_failure(
+                        "INTERNAL",
+                        "无法刷新临时 index 文件状态："
+                        f"{_git_error(flags)}",
+                    )
+                )
+            refresh = _run_git_bytes(
+                context,
+                ["add", "--renormalize", "--", *tracked_paths],
+                env=env,
+            )
+            if refresh.returncode != 0:
+                raise ClassifiedFailure(
+                    make_failure(
+                        "INTERNAL",
+                        "无法刷新工作区临时 index："
+                        f"{_git_error(refresh)}",
+                    )
+                )
+
+        add = _run_git_bytes(
+            context,
+            ["add", "-A", "--", "."],
+            env=env,
+        )
+        if add.returncode != 0:
+            raise ClassifiedFailure(
+                make_failure(
+                    "INTERNAL",
+                    f"无法构建工作区临时 index：{_git_error(add)}",
+                )
+            )
+        yield env
+
+
 def _parse_name_status(data: bytes) -> tuple[list[str], list[dict[str, Any]]]:
     fields = data.split(b"\0")
     if fields and fields[-1] == b"":
@@ -462,21 +590,12 @@ def _capture_changes(
     *,
     enforce_scope: bool = True,
     enforce_text: bool = True,
+    refresh_paths: list[str] | None = None,
 ) -> _ChangeSnapshot:
-    with tempfile.TemporaryDirectory(dir=context.run_dir) as temporary:
-        env = _temporary_index_environment(context, temporary)
-        read_tree = _run_git_bytes(
-            context,
-            ["read-tree", context.base_commit],
-            env=env,
-        )
-        if read_tree.returncode != 0:
-            raise RuntimeError(f"无法创建临时 Git index：{_git_error(read_tree)}")
-
-        add = _run_git_bytes(context, ["add", "-A", "--", "."], env=env)
-        if add.returncode != 0:
-            raise RuntimeError(f"无法构建工作区快照：{_git_error(add)}")
-
+    with _temporary_worktree_index(
+        context,
+        refresh_paths=refresh_paths,
+    ) as env:
         status = _run_git_bytes(
             context,
             [
@@ -530,14 +649,56 @@ def _capture_changes(
 def _check_patch_applies(
     context: CodingToolContext,
     patch_bytes: bytes,
+    env: dict[str, str],
 ) -> None:
     result = _run_git_bytes(
         context,
-        ["apply", "--check", "--recount", "--whitespace=nowarn", "-"],
+        [
+            "apply",
+            "--cached",
+            "--check",
+            "--recount",
+            "--whitespace=nowarn",
+            "-",
+        ],
         input_bytes=patch_bytes,
+        env=env,
     )
     if result.returncode != 0:
         raise ValueError(f"Patch 无法应用：{_git_error(result)}")
+
+
+def _materialize_index_paths(
+    context: CodingToolContext,
+    paths: list[str],
+    env: dict[str, str],
+) -> None:
+    for relative in paths:
+        present = _run_git_bytes(
+            context,
+            ["ls-files", "--error-unmatch", "--", relative],
+            env=env,
+        )
+        target = context.repo_root / Path(*PurePosixPath(relative).parts)
+        if present.returncode == 1:
+            if target.is_symlink() or target.is_file():
+                target.unlink()
+                _remove_empty_parents(target, context.repo_root)
+            continue
+        if present.returncode != 0:
+            raise RuntimeError(
+                f"无法检查临时 index 路径 {relative}：{_git_error(present)}"
+            )
+
+        checkout = _run_git_bytes(
+            context,
+            ["checkout-index", "--force", "--", relative],
+            env=env,
+        )
+        if checkout.returncode != 0:
+            raise RuntimeError(
+                f"无法从临时 index 写回 {relative}：{_git_error(checkout)}"
+            )
 
 
 def _coding_audit_path(context: CodingToolContext) -> Path:
@@ -545,6 +706,26 @@ def _coding_audit_path(context: CodingToolContext) -> Path:
         f"coding_audit_r{context.repair_round:02d}_"
         f"s{context.stage_call:02d}.jsonl"
     )
+
+
+def _audited_touched_files(context: CodingToolContext) -> list[str]:
+    path = _coding_audit_path(context)
+    if not path.exists():
+        return []
+
+    touched: set[str] = set()
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line:
+                continue
+            entry = json.loads(line)
+            if entry.get("success"):
+                touched.update(entry.get("touched_files", []))
+    except (OSError, ValueError, TypeError) as exc:
+        raise ClassifiedFailure(
+            make_failure("INTERNAL", f"无法读取 Coding 审计：{exc}")
+        ) from exc
+    return sorted(touched)
 
 
 def get_coding_iteration_count(context: CodingToolContext) -> int:
@@ -624,23 +805,31 @@ def _apply_patch(
         touched_files = _extract_patch_paths(context, patch_bytes)
         path_states = _capture_path_states(context, touched_files)
         _reject_ignored_new_paths(context, path_states)
-        _check_patch_applies(context, patch_bytes)
-
-        result = _run_git_bytes(
-            context,
-            ["apply", "--recount", "--whitespace=nowarn", "-"],
-            input_bytes=patch_bytes,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Patch 应用失败：{_git_error(result)}")
-        applied = True
+        with _temporary_worktree_index(context) as env:
+            _check_patch_applies(context, patch_bytes, env)
+            result = _run_git_bytes(
+                context,
+                [
+                    "apply",
+                    "--cached",
+                    "--recount",
+                    "--whitespace=nowarn",
+                    "-",
+                ],
+                input_bytes=patch_bytes,
+                env=env,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"Patch 应用失败：{_git_error(result)}")
+            applied = True
+            _materialize_index_paths(context, touched_files, env)
 
         for relative in touched_files:
             target = context.repo_root / Path(*PurePosixPath(relative).parts)
             if target.exists() or target.is_symlink():
                 _validate_existing_file(target, relative)
 
-        snapshot = _capture_changes(context)
+        snapshot = _capture_changes(context, refresh_paths=touched_files)
         cumulative_hash = hashlib.sha256(
             snapshot.diff.encode("utf-8")
         ).hexdigest()
@@ -938,19 +1127,42 @@ def rollback_to_base(
         if _current_head(context) != context.base_commit:
             raise RuntimeError("当前 HEAD 已变化，拒绝自动回滚。")
 
-        restore = _run_git_bytes(
-            context,
-            [
-                "restore",
-                f"--source={context.base_commit}",
-                "--staged",
-                "--worktree",
-                "--",
-                ".",
-            ],
-        )
-        if restore.returncode != 0:
-            raise RuntimeError(f"恢复跟踪文件失败：{_git_error(restore)}")
+        tracked_paths: list[str] = []
+        for relative in snapshot.changed_files:
+            exists = _run_git_bytes(
+                context,
+                [
+                    "ls-tree",
+                    "-z",
+                    "--name-only",
+                    context.base_commit,
+                    "--",
+                    relative,
+                ],
+            )
+            if exists.returncode != 0:
+                raise RuntimeError(
+                    f"无法检查基线文件 {relative}：{_git_error(exists)}"
+                )
+            if exists.stdout.rstrip(b"\0").decode("utf-8") == relative:
+                tracked_paths.append(relative)
+
+        if tracked_paths:
+            restore = _run_git_bytes(
+                context,
+                [
+                    "restore",
+                    f"--source={context.base_commit}",
+                    "--staged",
+                    "--worktree",
+                    "--",
+                    *tracked_paths,
+                ],
+            )
+            if restore.returncode != 0:
+                raise RuntimeError(
+                    f"恢复跟踪文件失败：{_git_error(restore)}"
+                )
 
         for relative in _list_untracked_files(context):
             normalized = _normalized_relative_path(relative)
