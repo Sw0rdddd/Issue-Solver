@@ -27,6 +27,7 @@ COORDINATOR_SYSTEM_PROMPT = """
 仓库画像与探索规则：
 - 输入中的 Repository Profile 是目标 Git 仓库的客观规模数据。结合它、Issue 的范围和当前证据缺口，自主选择本批最少必要的 1 至 3 个 Explore 目标；不得无理由默认派发 3 个。
 - 只有调查面彼此独立时才并行派发2至3个目标；后续补证优先使用一个明确、未覆盖的目标。
+- EXPLORE 时尽量为每个 explore_focuses 生成同位置的简洁 explore_titles。短标题优先保留关键路径或符号名，避免 Markdown、函数参数列表和解释句；标题仅用于终端展示，不影响工作流决策。
 - EvidenceDigest 是后续角色唯一可见的探索上下文。收到“本次新 Explore Reports”时，必须将它们与已有 digest 合并为新的紧凑摘要；只保留根因、关键 path:line 证据、相关文件/符号、已确认测试目标和未知项，必须保留重要信息，不得编造或丢失重要冲突。
 
 CodingTask 规则：
@@ -39,7 +40,7 @@ CodingTask 规则：
 - Issue 定向测试与原有回归测试对同一行为提出相反要求时，选择 FAILED，类型为 INPUT，并指出需要修正评测输入；不得尝试同时满足互相矛盾的断言。
 
 输出规则：
-- CODE 时 explore_focuses 为空，coding_task 必须是 JSON 对象，不能序列化为字符串；列表字段使用 JSON 数组，路径使用仓库相对路径。
+- CODE 时 explore_focuses 和 explore_titles 为空，coding_task 必须是 JSON 对象，不能序列化为字符串；列表字段使用 JSON 数组，路径使用仓库相对路径。
 - 存在“本次新 Explore Reports”时 evidence_digest 必须存在，source_report_count 必须等于输入中“已摘要报告数”与“本次新 Explore Reports”数量之和；没有新报告时 evidence_digest 必须为 null。
 - FAILED 时提供 failure；按 INPUT（输入）、ENVIRONMENT（环境）、MODEL（模型）、SOLUTION（修复方案）、SAFETY（安全边界）、LIMIT（限制）或 INTERNAL（工作流错误）分类，message 说明事实，suggestion 给出下一步动作。
 
@@ -48,6 +49,7 @@ CodingTask 规则：
   "next_action": "CODE",
   "current_summary": "根因和修改范围已明确，进入编码。",
   "explore_focuses": [],
+  "explore_titles": [],
   "coding_task": {
     "objective": "修复搜索大小写敏感问题",
     "acceptance_criteria": [

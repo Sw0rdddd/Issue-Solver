@@ -39,7 +39,8 @@ class RunReportSession:
                 ),
             )
         self.completed = True
-        self.reporter.start_timing("report")
+        self.reporter.report_started(agent_expected=model is not None)
+        report_agent = None
 
         try:
             report_model = (
@@ -96,5 +97,8 @@ class RunReportSession:
                     failure=failure,
                 )
 
-        self.reporter.report_completed(result)
+        self.reporter.report_completed(
+            result,
+            agent_attempted=report_agent is not None,
+        )
         return result

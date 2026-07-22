@@ -63,6 +63,7 @@ def test_explore_node_uses_custom_focus_and_saves_next_report(
     tmp_path: Path,
 ) -> None:
     focus = "定位空结果处理逻辑及相关测试"
+    title = "定位 search_items 实现与所有调用路径和大小写比较逻辑"
     previous_report = make_report("第一次探索")
     report = make_report(focus)
     agent = FakeExploreAgent(
@@ -74,7 +75,8 @@ def test_explore_node_uses_custom_focus_and_saves_next_report(
         received_repo_paths.append(repo_path)
         return agent
 
-    node = build_explore_node(build_agent)
+    clock = iter([10.0, 12.5]).__next__
+    node = build_explore_node(build_agent, clock=clock)
 
     result = node(
         {
@@ -82,6 +84,7 @@ def test_explore_node_uses_custom_focus_and_saves_next_report(
             "repo_path": str(tmp_path),
             "run_dir": str(tmp_path),
             "explore_focus": focus,
+            "explore_title": title,
             "explore_reports": [previous_report],
             "evidence_digest": EvidenceDigest(
                 source_report_count=1,
@@ -95,16 +98,23 @@ def test_explore_node_uses_custom_focus_and_saves_next_report(
         }
     )
 
-    assert result == {"explore_reports": [report]}
+    assert result["explore_reports"] == [report]
+    execution = result["explore_executions"][0]
+    assert execution.repair_round == 2
+    assert execution.stage_call == 3
+    assert execution.item_index == 2
+    assert execution.focus == focus
+    assert execution.title == title
+    assert execution.status == "PASSED"
+    assert execution.duration == 2.5
+    assert execution.failure is None
     assert len(agent.calls) == 1
     message = agent.calls[0]["messages"][0]
     assert message["role"] == "user"
     assert focus in message["content"]
     assert "当前 EvidenceDigest" in message["content"]
     assert "app.py:8 未处理 None" in message["content"]
-    assert agent.configs == [
-        {"recursion_limit": Setting().AGENT_RECURSION_LIMIT}
-    ]
+    assert agent.configs == [{"recursion_limit": Setting().AGENT_RECURSION_LIMIT}]
     assert received_repo_paths == [str(tmp_path)]
 
     report_path = tmp_path / "logs" / "explore_r02_s03_i02.json"
@@ -115,6 +125,7 @@ def test_explore_node_uses_custom_focus_and_saves_next_report(
         "stage_call": 3,
         "index": 2,
         "payload": report.model_dump(),
+        "metadata": {"title": title, "task": focus},
     }
 
 
@@ -135,7 +146,11 @@ def test_explore_node_uses_default_focus_when_not_provided(
         }
     )
 
-    assert result == {"explore_reports": [report]}
+    assert result["explore_reports"] == [report]
+    execution = result["explore_executions"][0]
+    assert execution.focus == "定位与 Issue 相关的代码、潜在根因和测试位置"
+    assert execution.status == "PASSED"
+    assert execution.duration >= 0
     content = agent.calls[0]["messages"][0]["content"]
     assert "定位与 Issue 相关的代码、潜在根因和测试位置" in content
     assert "当前 EvidenceDigest：\n暂无" in content
@@ -154,9 +169,10 @@ def test_explore_node_rejects_missing_issue(tmp_path: Path) -> None:
     )
 
     assert result["explore_failures"][0].type == "INTERNAL"
-    assert "State 中缺少规范化后的 Issue" in (
-        result["explore_failures"][0].message
-    )
+    assert "State 中缺少规范化后的 Issue" in (result["explore_failures"][0].message)
+    execution = result["explore_executions"][0]
+    assert execution.status == "FAILED"
+    assert execution.failure == result["explore_failures"][0]
     assert agent.calls == []
 
 
@@ -223,9 +239,7 @@ def test_explore_node_returns_agent_error(tmp_path: Path) -> None:
 def test_explore_node_classifies_recursion_limit(tmp_path: Path) -> None:
     recursion_limit = Setting().AGENT_RECURSION_LIMIT
     agent = FakeExploreAgent(
-        error=GraphRecursionError(
-            f"Recursion limit of {recursion_limit} reached"
-        )
+        error=GraphRecursionError(f"Recursion limit of {recursion_limit} reached")
     )
     node = build_explore_node(build_agent_factory(agent))
 
@@ -241,8 +255,7 @@ def test_explore_node_classifies_recursion_limit(tmp_path: Path) -> None:
     failure = result["explore_failures"][0]
     assert failure.type == "LIMIT"
     assert failure.message == (
-        "仓库探索失败：Explore Agent 达到最大执行步数 "
-        f"{recursion_limit}。"
+        f"仓库探索失败：Explore Agent 达到最大执行步数 {recursion_limit}。"
     )
 
 
@@ -265,11 +278,14 @@ def test_explore_node_uses_send_coordinates(tmp_path: Path) -> None:
         }
     )
 
-    assert result == {"explore_reports": [report]}
+    assert result["explore_reports"] == [report]
+    execution = result["explore_executions"][0]
+    assert execution.repair_round == 2
+    assert execution.stage_call == 4
+    assert execution.item_index == 3
+    assert execution.focus == "并行探索"
     assert (tmp_path / "logs" / "explore_r02_s04_i03.json").is_file()
-    assert not (
-        tmp_path / "logs" / "explore_r02_s04_i01.json"
-    ).exists()
+    assert not (tmp_path / "logs" / "explore_r02_s04_i01.json").exists()
 
 
 def test_send_branches_write_unique_report_files(tmp_path: Path) -> None:
@@ -284,6 +300,7 @@ def test_send_branches_write_unique_report_files(tmp_path: Path) -> None:
             return {
                 "next_action": "EXPLORE",
                 "explore_focuses": ["入口", "根因", "测试"],
+                "explore_titles": ["定位入口", "分析根因", "检查测试"],
                 "explore_stage_call": 1,
             }
         return {"next_action": "CODE"}
@@ -317,9 +334,14 @@ def test_send_branches_write_unique_report_files(tmp_path: Path) -> None:
 
     assert len(agent.calls) == 3
     assert len(result["explore_reports"]) == 3
+    assert len(result["explore_executions"]) == 3
     assert sorted(
-        path.name for path in (tmp_path / "logs").glob("explore_*.json")
-    ) == [
+        execution.item_index for execution in result["explore_executions"]
+    ) == [1, 2, 3]
+    assert sorted(
+        execution.title for execution in result["explore_executions"]
+    ) == ["分析根因", "定位入口", "检查测试"]
+    assert sorted(path.name for path in (tmp_path / "logs").glob("explore_*.json")) == [
         "explore_r01_s01_i01.json",
         "explore_r01_s01_i02.json",
         "explore_r01_s01_i03.json",

@@ -41,6 +41,7 @@ def test_route_after_coordinator_dispatches_send_branches() -> None:
             "status": "RUNNING",
             "next_action": "EXPLORE",
             "explore_focuses": ["入口", "根因", "测试"],
+            "explore_titles": ["定位入口", "分析根因", "检查测试"],
             "explore_reports": [make_report()],
             "cycle": 1,
             "explore_stage_call": 2,
@@ -54,6 +55,11 @@ def test_route_after_coordinator_dispatches_send_branches() -> None:
         "入口",
         "根因",
         "测试",
+    ]
+    assert [route.arg["explore_title"] for route in routes] == [
+        "定位入口",
+        "分析根因",
+        "检查测试",
     ]
     assert [route.arg["repair_round"] for route in routes] == [2, 2, 2]
     assert [route.arg["explore_stage_call"] for route in routes] == [2, 2, 2]
@@ -75,6 +81,13 @@ def test_route_after_coordinator_rejects_invalid_state() -> None:
             "explore_focuses": [],
         }
     ) == "FAILED"
+    assert route_after_coordinator(
+        {
+            "next_action": "EXPLORE",
+            "explore_focuses": ["入口"],
+            "explore_titles": [],
+        }
+    ) == "FAILED"
 
 
 def test_parallel_explore_errors_are_reduced_before_failure() -> None:
@@ -93,6 +106,7 @@ def test_parallel_explore_errors_are_reduced_before_failure() -> None:
         return {
             "next_action": "EXPLORE",
             "explore_focuses": ["成功分支", "失败一", "失败二"],
+            "explore_titles": ["成功分支", "失败一", "失败二"],
         }
 
     def explore_node(state: dict) -> dict:

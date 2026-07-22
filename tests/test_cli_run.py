@@ -104,6 +104,7 @@ def configure_success_stream(
                 "phase": "EXPLORE",
                 "next_action": "EXPLORE",
                 "explore_focuses": ["定位入口", "定位测试"],
+                "explore_titles": ["定位入口", "定位测试"],
                 "repair_round": 1,
                 "explore_stage_call": 1,
             }
@@ -390,6 +391,7 @@ def test_run_streams_graph_with_initial_state_and_progress(
             source=".venv",
         ),
         "explore_reports": [],
+        "explore_executions": [],
         "explore_failures": [],
         "test_results": [],
         "latest_test_results": [],
@@ -510,6 +512,7 @@ def test_run_displays_repeated_explore_rounds(
             "coordinator": {
                 "next_action": "EXPLORE",
                 "explore_focuses": ["入口", "测试"],
+                "explore_titles": ["定位入口", "检查测试"],
                 "repair_round": 1,
                 "explore_stage_call": 1,
             }
@@ -524,6 +527,7 @@ def test_run_displays_repeated_explore_rounds(
             "coordinator": {
                 "next_action": "EXPLORE",
                 "explore_focuses": ["补充根因"],
+                "explore_titles": ["补充根因"],
                 "repair_round": 1,
                 "explore_stage_call": 2,
             }
@@ -728,12 +732,14 @@ def test_failure_with_changes_interactively_rolls_back_and_records_decision(
         },
     )
 
-    rollback_succeeded = run_module._prompt_failure_rollback(
-        result,
-        TerminalReporter(),
-    )
+    reporter = TerminalReporter()
+    prepare_for_prompt = Mock(wraps=reporter.prepare_for_prompt)
+    monkeypatch.setattr(reporter, "prepare_for_prompt", prepare_for_prompt)
+
+    rollback_succeeded = run_module._prompt_failure_rollback(result, reporter)
 
     assert rollback_succeeded is True
+    prepare_for_prompt.assert_called_once_with()
     assert result["changed_files"] == []
     decision = json.loads(
         (run_dir / "logs" / "rollback_decision_r02.json").read_text(

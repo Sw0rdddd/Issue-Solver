@@ -185,6 +185,7 @@ def test_compiled_graph_fans_out_and_joins_explore_nodes(
                 "next_action": "EXPLORE",
                 "current_summary": "并行探索",
                 "explore_focuses": ["入口", "根因", "测试"],
+                "explore_titles": ["定位入口", "分析根因", "检查测试"],
                 "phase": "EXPLORE",
                 "repair_round": 1,
                 "explore_stage_call": 1,
@@ -366,6 +367,7 @@ def test_compiled_graph_runs_review_test_and_finalize_without_coordinator(
             return {
                 "next_action": "EXPLORE",
                 "explore_focuses": ["定位"],
+                "explore_titles": ["定位实现"],
                 "repair_round": 1,
                 "explore_stage_call": 1,
             }

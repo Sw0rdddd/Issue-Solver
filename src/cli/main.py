@@ -2,8 +2,8 @@ import time
 from collections.abc import Sequence
 
 from cli.arguments import build_parser
+from cli.rich_terminal import create_terminal_reporter
 from cli.run import run_command
-from cli.terminal import TerminalReporter
 from schemas.failure import failure_from_exception
 from services.token_usage import TokenUsageMonitor
 
@@ -19,7 +19,7 @@ def main(
     args = parser.parse_args(argv)
 
     if args.command == "run":
-        reporter = TerminalReporter(
+        reporter = create_terminal_reporter(
             quiet=args.quiet,
             leading_blank=True,
         )

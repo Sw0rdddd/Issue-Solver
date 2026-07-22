@@ -116,6 +116,7 @@ def test_reporter_groups_rounds_and_records_stage_durations() -> None:
             "repair_round": 1,
             "explore_stage_call": 1,
             "explore_focuses": ["定位入口", "定位测试"],
+            "explore_titles": ["定位入口", "定位测试"],
         },
     )
     clock.advance(3.0)

@@ -96,6 +96,7 @@ def write_stage_artifact(
     stage_call: int,
     index: int,
     payload: Any,
+    metadata: dict[str, Any] | None = None,
 ) -> Path:
     """以统一 r/s/i 坐标保存不可覆盖的阶段 JSON 产物。"""
 
@@ -118,5 +119,7 @@ def write_stage_artifact(
         "index": index,
         "payload": _json_payload(payload),
     }
+    if metadata:
+        envelope["metadata"] = _json_payload(metadata)
     _write_json_exclusive(path, envelope)
     return path

@@ -7,6 +7,7 @@ from graph.state import NextAction, Phase, ResolverState, RunStatus
 from schemas.coding_result import CodingResult
 from schemas.coding_task import CodingTask
 from schemas.evidence_digest import EvidenceDigest
+from schemas.explore_execution import ExploreExecution
 from schemas.explore_report import ExploreReport
 from schemas.failure import FailureInfo, make_failure
 from schemas.issue_specification import IssueSpec
@@ -27,6 +28,19 @@ def test_issue_spec_defaults_and_json_serialization() -> None:
 @pytest.mark.parametrize(
     ("model", "payload"),
     [
+        (
+            ExploreExecution,
+            {
+                "repair_round": 1,
+                "stage_call": 2,
+                "item_index": 3,
+                "focus": "定位异常",
+                "title": "定位异常实现",
+                "status": "PASSED",
+                "duration": 1.25,
+                "failure": None,
+            },
+        ),
         (
             ExploreReport,
             {
@@ -119,6 +133,7 @@ def test_schema_accepts_complete_payload(model: type, payload: dict) -> None:
     "model",
     [
         IssueSpec,
+        ExploreExecution,
         ExploreReport,
         EvidenceDigest,
         RepositoryProfile,
@@ -164,6 +179,26 @@ def test_failure_info_rejects_unknown_type_and_extra_fields() -> None:
                 "suggestion": "建议",
                 "code": "legacy",
             }
+        )
+
+
+def test_explore_execution_requires_failure_only_when_failed() -> None:
+    payload = {
+        "repair_round": 1,
+        "stage_call": 1,
+        "item_index": 1,
+        "focus": "定位入口",
+        "duration": 0.5,
+    }
+
+    with pytest.raises(ValidationError):
+        ExploreExecution(status="FAILED", **payload)
+
+    with pytest.raises(ValidationError):
+        ExploreExecution(
+            status="PASSED",
+            failure=make_failure("MODEL", "探索失败"),
+            **payload,
         )
 
 
@@ -280,9 +315,7 @@ def test_coding_task_normalizes_pytest_node_ids() -> None:
         test_targets=["tests\\test_app.py::TestQuery::test_empty"],
     )
 
-    assert task.test_targets == [
-        "tests/test_app.py::TestQuery::test_empty"
-    ]
+    assert task.test_targets == ["tests/test_app.py::TestQuery::test_empty"]
 
 
 @pytest.mark.parametrize(
@@ -477,6 +510,8 @@ def test_resolver_state_required_and_optional_keys() -> None:
             "next_action",
             "explore_focus",
             "explore_focuses",
+            "explore_title",
+            "explore_titles",
             "repair_round",
             "explore_stage_call",
             "explore_item_index",
@@ -484,6 +519,7 @@ def test_resolver_state_required_and_optional_keys() -> None:
             "coding_iteration",
             "coding_task",
             "explore_reports",
+            "explore_executions",
             "evidence_digest",
             "explore_failures",
             "coding_result",

@@ -92,6 +92,7 @@ def _prompt_failure_rollback(
     should_rollback = False
     decision = "KEEP_NON_INTERACTIVE"
     if interactive:
+        reporter.prepare_for_prompt()
         while True:
             try:
                 answer = input(
@@ -222,6 +223,7 @@ def run_command(
         run_id=run_id,
         repo_path=repo_root,
         run_dir=run_dir,
+        run_root=configured_run_root,
     )
     report_session = RunReportSession(
         run_dir=run_dir,
@@ -243,7 +245,6 @@ def run_command(
     try:
         environment = _preflight_environment(repo_root, run_dir)
     except Exception as exc:
-        reporter.preflight_failed()
         failure = failure_from_exception(
             exc,
             "ENVIRONMENT",
@@ -266,6 +267,7 @@ def run_command(
                 "INTERNAL",
                 f"{failure.message}；记录环境失败日志失败：{artifact_exc}",
             )
+        reporter.preflight_failed(failure)
         reporter.error_block(
             "环境预检失败",
             reporter.failure_details(failure)
@@ -320,6 +322,7 @@ def run_command(
             "test_timeout": args.test_timeout or setting.TEST_TIMEOUT,
             "test_tail_lines": args.test_tail_lines or setting.TEST_TAIL_LINES,
             "explore_reports": [],
+            "explore_executions": [],
             "explore_failures": [],
             "test_results": [],
             "latest_test_results": [],

@@ -5,6 +5,7 @@ from unittest.mock import Mock
 from cli import report as report_module
 from cli.report import RunReportSession
 from cli.terminal import TerminalReporter
+from services.report import ReportResult
 
 
 def test_report_session_uses_template_when_agent_build_fails(
@@ -112,3 +113,57 @@ def test_report_session_uses_non_thinking_model(monkeypatch, tmp_path: Path) -> 
 
     assert received_models == [non_thinking_model]
     token_usage.with_role.assert_called_once_with(report_agent, "Reporter")
+
+
+def test_report_session_reports_actual_executor(monkeypatch, tmp_path: Path) -> None:
+    result = ReportResult(path=str(tmp_path / "report.md"), fallback_used=False)
+    monkeypatch.setattr(
+        report_module,
+        "build_non_thinking_model",
+        lambda value: value,
+    )
+    monkeypatch.setattr(
+        report_module,
+        "build_report_agent",
+        lambda value: value,
+    )
+    monkeypatch.setattr(
+        report_module,
+        "create_run_report",
+        Mock(return_value=result),
+    )
+    state = {"status": "FINISHED", "phase": "FINALIZE"}
+
+    agent_reporter = Mock(spec=TerminalReporter)
+    RunReportSession(
+        run_dir=tmp_path,
+        model_name="test-model",
+        reporter=agent_reporter,
+    ).finish(
+        state=state,
+        model=object(),
+        worktree_status="保留修改",
+    )
+
+    agent_reporter.report_started.assert_called_once_with(agent_expected=True)
+    agent_reporter.report_completed.assert_called_once_with(
+        result,
+        agent_attempted=True,
+    )
+
+    system_reporter = Mock(spec=TerminalReporter)
+    RunReportSession(
+        run_dir=tmp_path,
+        model_name=None,
+        reporter=system_reporter,
+    ).finish(
+        state=state,
+        model=None,
+        worktree_status="未修改",
+    )
+
+    system_reporter.report_started.assert_called_once_with(agent_expected=False)
+    system_reporter.report_completed.assert_called_once_with(
+        result,
+        agent_attempted=False,
+    )

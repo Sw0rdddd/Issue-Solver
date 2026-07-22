@@ -5,6 +5,7 @@ from schemas.coding_result import CodingResult
 from schemas.coding_task import CodingTask
 from schemas.evidence_digest import EvidenceDigest
 from schemas.environment_info import EnvironmentInfo
+from schemas.explore_execution import ExploreExecution
 from schemas.explore_report import ExploreReport
 from schemas.failure import FailureInfo
 from schemas.issue_specification import IssueSpec
@@ -47,7 +48,7 @@ class ResolverState(TypedDict):
     status: RunStatus
     cycle: int
     repo_path: str
-    run_dir: str #本次 Issue 修复任务的运行记录目录
+    run_dir: str  # 本次 Issue 修复任务的运行记录目录
     issue_input: str  # 用户输入的 Issue URL 或 Issue 文本
 
     # 运行级配置，未提供时由节点使用默认值
@@ -71,6 +72,7 @@ class ResolverState(TypedDict):
     current_summary: NotRequired[str]
     next_action: NotRequired[NextAction]
     explore_focuses: NotRequired[list[str]]
+    explore_titles: NotRequired[list[str]]
     repair_round: NotRequired[int]
     explore_stage_call: NotRequired[int]
     coding_stage_call: NotRequired[int]
@@ -78,12 +80,12 @@ class ResolverState(TypedDict):
 
     # Send 分支输入
     explore_focus: NotRequired[str]
+    explore_title: NotRequired[str]
     explore_item_index: NotRequired[int]
 
     # Explore 节点并行写入
-    explore_reports: NotRequired[
-        Annotated[list[ExploreReport], add]
-    ]
+    explore_reports: NotRequired[Annotated[list[ExploreReport], add]]
+    explore_executions: NotRequired[Annotated[list[ExploreExecution], add]]
     evidence_digest: NotRequired[EvidenceDigest]
     explore_failures: NotRequired[Annotated[list[FailureInfo], add]]
 

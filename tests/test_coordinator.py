@@ -135,6 +135,8 @@ def test_coordinator_prompt_requires_nested_coding_task_object() -> None:
     assert "coding_task 必须是 JSON 对象" in COORDINATOR_SYSTEM_PROMPT
     assert "不能序列化为字符串" in COORDINATOR_SYSTEM_PROMPT
     assert '"explore_focuses": []' in COORDINATOR_SYSTEM_PROMPT
+    assert '"explore_titles": []' in COORDINATOR_SYSTEM_PROMPT
+    assert "标题仅用于终端展示，不影响工作流决策" in COORDINATOR_SYSTEM_PROMPT
     assert '"coding_task": {' in COORDINATOR_SYSTEM_PROMPT
     assert '"acceptance_criteria": [' in COORDINATOR_SYSTEM_PROMPT
     assert '"relevant_files": [' in COORDINATOR_SYSTEM_PROMPT
@@ -224,9 +226,11 @@ def test_coordinator_decision_accepts_one_to_three_focuses(
         next_action="EXPLORE",
         current_summary="需要探索仓库",
         explore_focuses=[f"目标 {index}" for index in range(count)],
+        explore_titles=[f"探索 {index}" for index in range(count)],
     )
 
     assert len(decision.explore_focuses) == count
+    assert len(decision.explore_titles) == count
 
 
 @pytest.mark.parametrize("focuses", [[], ["1", "2", "3", "4"]])
@@ -247,6 +251,30 @@ def test_coordinator_decision_requires_task_for_code() -> None:
             next_action="CODE",
             current_summary="准备修改代码",
         )
+
+
+@pytest.mark.parametrize(
+    "titles",
+    [
+        [],
+        ["重复标题", "重复标题"],
+        ["`search_items`"],
+        ["定位入口\n检查调用"],
+        ["定位搜索逻辑…"],
+        ["检查 tests/test_search.py 的现有测试结构"],
+    ],
+)
+def test_coordinator_decision_accepts_noncritical_explore_titles(
+    titles: list[str],
+) -> None:
+    decision = CoordinatorDecision(
+        next_action="EXPLORE",
+        current_summary="需要探索仓库",
+        explore_focuses=["完整探索任务"],
+        explore_titles=titles,
+    )
+
+    assert decision.explore_titles == titles
 
 
 def test_coordinator_failed_decision_requires_failure() -> None:
@@ -296,6 +324,7 @@ def test_coordinator_node_initially_dispatches_three_focuses() -> None:
         next_action="EXPLORE",
         current_summary="并行定位入口、根因和测试",
         explore_focuses=["定位入口", "分析根因", "查找测试"],
+        explore_titles=["定位入口", "分析根因", "查找测试"],
     )
     agent = FakeCoordinatorAgent(result=decision)
     node = build_coordinator_node(agent)
@@ -306,6 +335,7 @@ def test_coordinator_node_initially_dispatches_three_focuses() -> None:
         "next_action": "EXPLORE",
         "current_summary": "并行定位入口、根因和测试",
         "explore_focuses": ["定位入口", "分析根因", "查找测试"],
+        "explore_titles": ["定位入口", "分析根因", "查找测试"],
         "phase": "EXPLORE",
         "repair_round": 1,
         "explore_stage_call": 1,
@@ -316,12 +346,37 @@ def test_coordinator_node_initially_dispatches_three_focuses() -> None:
     assert "当前循环：0/5" in agent.calls[0][1].content
 
 
+def test_coordinator_node_normalizes_nonblocking_explore_titles() -> None:
+    decision = CoordinatorDecision(
+        next_action="EXPLORE",
+        current_summary="并行探索",
+        explore_focuses=["完整任务一", "完整任务二", "完整任务三"],
+        explore_titles=[
+            "  `定位\nsearch_items`  ",
+            "定位 search_items",
+            "",
+            "多余标题",
+        ],
+    )
+
+    result = build_coordinator_node(FakeCoordinatorAgent(result=decision))(
+        {"issue": make_issue(), "cycle": 0}
+    )
+
+    assert result["explore_titles"] == [
+        "定位 search_items",
+        "Explore task 02",
+        "Explore task 03",
+    ]
+
+
 def test_coordinator_node_builds_coding_task_after_explore() -> None:
     task = make_coding_task()
     agent = FakeCoordinatorAgent(
         result=CoordinatorDecision(
             next_action="CODE",
             current_summary="根因已明确，进入修改",
+            explore_titles=["此展示字段应被忽略"],
             coding_task=task,
         )
     )
@@ -341,6 +396,7 @@ def test_coordinator_node_builds_coding_task_after_explore() -> None:
         "next_action": "CODE",
         "current_summary": "根因已明确，进入修改",
         "explore_focuses": [],
+        "explore_titles": [],
         "evidence_digest": make_digest(),
         "phase": "CODE",
         "coding_task": task,
@@ -461,6 +517,7 @@ def test_coordinator_forces_code_after_explore_budget_is_used() -> None:
                 next_action="EXPLORE",
                 current_summary="仍想继续探索",
                 explore_focuses=["重复确认根因"],
+                explore_titles=["确认根因"],
             ),
             CoordinatorDecision(
                 next_action="CODE",
@@ -504,6 +561,7 @@ def test_coordinator_keeps_stage_calls_independent() -> None:
             next_action="EXPLORE",
             current_summary="继续补充探索",
             explore_focuses=["检查调用方"],
+            explore_titles=["检查调用方"],
         )
     )
     node = build_coordinator_node(agent)
@@ -530,6 +588,7 @@ def test_coordinator_resets_other_stage_counter_in_new_round() -> None:
             next_action="EXPLORE",
             current_summary="测试失败后重新探索",
             explore_focuses=["定位失败根因"],
+            explore_titles=["定位失败根因"],
         )
     )
     node = build_coordinator_node(agent)
@@ -597,6 +656,7 @@ def test_coordinator_node_allows_finish_after_review_and_test_pass() -> None:
         "next_action": "FINISH",
         "current_summary": "审查和测试均通过",
         "explore_focuses": [],
+        "explore_titles": [],
         "evidence_digest": make_digest(),
         "phase": "FINALIZE",
     }

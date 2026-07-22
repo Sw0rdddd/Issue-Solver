@@ -105,6 +105,7 @@ class TerminalReporter:
         self.run_id: str | None = None
         self.repo_path: str | None = None
         self.run_dir: str | None = None
+        self.run_root_display: str | None = None
         self.status = "失败"
         self.phase: str | None = None
         self.next_action: str | None = None
@@ -199,11 +200,13 @@ class TerminalReporter:
         run_id: str,
         repo_path: str | Path,
         run_dir: str | Path,
+        run_root: str | Path | None = None,
     ) -> None:
         self.model_name = model_name or "未配置"
         self.run_id = run_id
         self.repo_path = str(repo_path)
         self.run_dir = str(run_dir)
+        self.run_root_display = str(run_root) if run_root is not None else None
         if self.quiet:
             return
         self._write(f"issue-solver · {self.model_name} · {run_id}")
@@ -221,7 +224,7 @@ class TerminalReporter:
         )
         self._progress()
 
-    def preflight_failed(self) -> None:
+    def preflight_failed(self, failure: FailureInfo | None = None) -> None:
         elapsed = self._duration("preflight")
         self._progress(f"✗ 环境预检失败 · {elapsed:.2f} 秒")
 
@@ -465,7 +468,15 @@ class TerminalReporter:
                 }
             )
 
-    def report_completed(self, result: ReportResult) -> None:
+    def report_started(self, *, agent_expected: bool) -> None:
+        self.start_timing("report")
+
+    def report_completed(
+        self,
+        result: ReportResult,
+        *,
+        agent_attempted: bool | None = None,
+    ) -> None:
         elapsed = self._duration("report")
         self.report_path = result.path
         self.report_generation = (
@@ -518,6 +529,9 @@ class TerminalReporter:
 
     def notice(self, value: str, *, error: bool = False) -> None:
         self._write(value, error=error)
+
+    def prepare_for_prompt(self) -> None:
+        """在交互式输入前完成当前终端渲染。"""
 
     def set_outcome(
         self,

@@ -38,7 +38,10 @@ def route_after_coordinator(
     next_action = state.get("next_action")
     if next_action == "EXPLORE":
         focuses = state.get("explore_focuses", [])
+        titles = state.get("explore_titles", [])
         if not 1 <= len(focuses) <= 3:
+            return "FAILED"
+        if len(titles) != len(focuses):
             return "FAILED"
 
         repair_round = state.get("repair_round", state.get("cycle", 0) + 1)
@@ -49,6 +52,7 @@ def route_after_coordinator(
                 {
                     **state,
                     "explore_focus": focus,
+                    "explore_title": titles[index],
                     "repair_round": repair_round,
                     "explore_stage_call": stage_call,
                     "explore_item_index": index + 1,

@@ -29,6 +29,7 @@ def _failed_update(
         "next_action": "FAILED",
         "current_summary": failure.message,
         "explore_focuses": [],
+        "explore_titles": [],
         "failure": failure,
     }
     if rollback_required:
@@ -38,6 +39,25 @@ def _failed_update(
             }
         )
     return update
+
+
+def _normalize_explore_titles(
+    focuses: list[str],
+    titles: list[str],
+) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for index, _focus in enumerate(focuses, start=1):
+        raw_title = titles[index - 1] if index <= len(titles) else ""
+        title = " ".join(raw_title.replace("`", "").split())
+        fallback = f"Explore task {index:02d}"
+        if not title or title in seen:
+            title = fallback
+        if title in seen:
+            title = f"{fallback}-{index}"
+        normalized.append(title)
+        seen.add(title)
+    return normalized
 
 
 def _path_is_in_scope(path: str, scope: str) -> bool:
@@ -281,11 +301,16 @@ def build_coordinator_node(coordinator_agent: Any):
                 "next_action": decision.next_action,
                 "current_summary": decision.current_summary,
                 "explore_focuses": [],
+                "explore_titles": [],
             }
             if new_explore_reports:
                 update["evidence_digest"] = decision.evidence_digest
 
             if decision.next_action == "EXPLORE":
+                explore_titles = _normalize_explore_titles(
+                    decision.explore_focuses,
+                    decision.explore_titles,
+                )
                 is_new_round = state.get("repair_round") != repair_round
                 explore_stage_call = _next_stage_call(
                     state,
@@ -296,6 +321,7 @@ def build_coordinator_node(coordinator_agent: Any):
                     {
                         "phase": "EXPLORE",
                         "explore_focuses": decision.explore_focuses,
+                        "explore_titles": explore_titles,
                         "repair_round": repair_round,
                         "explore_stage_call": explore_stage_call,
                     }
