@@ -8,6 +8,7 @@ from config import Setting
 from graph.routing import route_after_coordinator
 from graph.state import ResolverState
 from nodes.explore import build_explore_node
+from schemas.evidence_digest import EvidenceDigest
 from schemas.explore_report import ExploreReport
 from schemas.issue_specification import IssueSpec
 
@@ -81,8 +82,13 @@ def test_explore_node_uses_custom_focus_and_saves_next_report(
             "repo_path": str(tmp_path),
             "run_dir": str(tmp_path),
             "explore_focus": focus,
-            "current_summary": "Issue 已完成规范化",
             "explore_reports": [previous_report],
+            "evidence_digest": EvidenceDigest(
+                source_report_count=1,
+                root_cause="app.py:8 未处理 None",
+                key_evidence=["app.py:8 直接遍历返回值"],
+                relevant_files=["app.py"],
+            ),
             "repair_round": 2,
             "explore_stage_call": 3,
             "explore_item_index": 2,
@@ -94,7 +100,8 @@ def test_explore_node_uses_custom_focus_and_saves_next_report(
     message = agent.calls[0]["messages"][0]
     assert message["role"] == "user"
     assert focus in message["content"]
-    assert "Issue 已完成规范化" in message["content"]
+    assert "当前 EvidenceDigest" in message["content"]
+    assert "app.py:8 未处理 None" in message["content"]
     assert agent.configs == [
         {"recursion_limit": Setting().AGENT_RECURSION_LIMIT}
     ]
@@ -131,7 +138,7 @@ def test_explore_node_uses_default_focus_when_not_provided(
     assert result == {"explore_reports": [report]}
     content = agent.calls[0]["messages"][0]["content"]
     assert "定位与 Issue 相关的代码、潜在根因和测试位置" in content
-    assert "当前工作流摘要：\n暂无" in content
+    assert "当前 EvidenceDigest：\n暂无" in content
     assert (tmp_path / "logs" / "explore_r01_s01_i01.json").is_file()
 
 

@@ -4,6 +4,7 @@ import pytest
 
 from nodes import initialize
 from schemas.environment_info import EnvironmentInfo
+from schemas.repository_profile import RepositoryProfile
 
 
 ENVIRONMENT = EnvironmentInfo(
@@ -23,6 +24,16 @@ def test_initialize_node_returns_repository_context(
     monkeypatch.setattr(initialize, "find_repo_root", lambda path: repo_root)
     monkeypatch.setattr(initialize, "is_worktree_clean", lambda path: True)
     monkeypatch.setattr(initialize, "get_current_commit", lambda path: "abc123")
+    profile = RepositoryProfile(
+        tracked_file_count=8,
+        tracked_file_bytes=4096,
+        file_counts_by_extension={".md": 1, ".txt": 7},
+    )
+    monkeypatch.setattr(
+        initialize,
+        "get_repository_profile",
+        lambda path: profile,
+    )
     monkeypatch.setattr(initialize, "detect_project_type", lambda path: "python")
     monkeypatch.setattr(
         initialize,
@@ -40,6 +51,7 @@ def test_initialize_node_returns_repository_context(
         "project_type": "python",
         "test_commands": ["pytest -q"],
         "environment": ENVIRONMENT,
+        "repository_profile": profile,
         "phase": "PARSE_ISSUE",
     }
 

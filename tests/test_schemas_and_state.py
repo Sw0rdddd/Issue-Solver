@@ -6,9 +6,11 @@ from pydantic import ValidationError
 from graph.state import NextAction, Phase, ResolverState, RunStatus
 from schemas.coding_result import CodingResult
 from schemas.coding_task import CodingTask
+from schemas.evidence_digest import EvidenceDigest
 from schemas.explore_report import ExploreReport
 from schemas.failure import FailureInfo, make_failure
 from schemas.issue_specification import IssueSpec
+from schemas.repository_profile import RepositoryProfile
 from schemas.review_result import ReviewResult
 from schemas.test_result import TestResult as ExecutionResult
 
@@ -35,6 +37,26 @@ def test_issue_spec_defaults_and_json_serialization() -> None:
                 "root_cause": "直接遍历 None",
                 "test_targets": ["test_app.py"],
                 "unknowns": [],
+            },
+        ),
+        (
+            EvidenceDigest,
+            {
+                "source_report_count": 1,
+                "root_cause": "app.py:8 返回值为 None",
+                "key_evidence": ["app.py:8 直接遍历返回值"],
+                "relevant_files": ["app.py"],
+                "relevant_symbols": ["handle_request"],
+                "test_targets": ["tests/test_app.py"],
+                "unknowns": [],
+            },
+        ),
+        (
+            RepositoryProfile,
+            {
+                "tracked_file_count": 3,
+                "tracked_file_bytes": 1024,
+                "file_counts_by_extension": {".md": 1, ".txt": 2},
             },
         ),
         (
@@ -98,6 +120,8 @@ def test_schema_accepts_complete_payload(model: type, payload: dict) -> None:
     [
         IssueSpec,
         ExploreReport,
+        EvidenceDigest,
+        RepositoryProfile,
         CodingTask,
         CodingResult,
         ReviewResult,
@@ -447,6 +471,7 @@ def test_resolver_state_required_and_optional_keys() -> None:
             "project_type",
             "test_commands",
             "environment",
+            "repository_profile",
             "issue",
             "current_summary",
             "next_action",
@@ -459,6 +484,7 @@ def test_resolver_state_required_and_optional_keys() -> None:
             "coding_iteration",
             "coding_task",
             "explore_reports",
+            "evidence_digest",
             "explore_failures",
             "coding_result",
             "changed_files",

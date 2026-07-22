@@ -1,4 +1,5 @@
 from schemas.issue_specification import IssueSpec
+from schemas.evidence_digest import EvidenceDigest
 
 EXPLORE_SYSTEM_PROMPT = """
 你是 issue-solver 的 Explore Agent，负责只读调查仓库，定位与 Issue 相关的代码、调用路径、潜在根因和现有测试，并返回 ExploreReport。
@@ -21,7 +22,7 @@ EXPLORE_SYSTEM_PROMPT = """
 def build_explore_input(
     issue: IssueSpec,
     focus: str,
-    current_summary: str = "",
+    evidence_digest: EvidenceDigest | None = None,
 ) -> str:
     """构造 Explore Agent 的任务消息。"""
 
@@ -31,8 +32,8 @@ def build_explore_input(
 本次探索重点：
 {focus}
 
-当前工作流摘要：
-{current_summary or "暂无"}
+当前 EvidenceDigest：
+{evidence_digest.model_dump_json(indent=2) if evidence_digest else "暂无"}
 
 规范化 Issue：
 {issue.model_dump_json(indent=2)}

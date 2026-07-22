@@ -1,7 +1,5 @@
-import json
-
 from schemas.coding_task import CodingTask
-from schemas.explore_report import ExploreReport
+from schemas.evidence_digest import EvidenceDigest
 from schemas.issue_specification import IssueSpec
 
 
@@ -41,20 +39,15 @@ def build_coding_input(
     repo_path: str,
     issue: IssueSpec,
     coding_task: CodingTask,
-    explore_reports: list[ExploreReport],
-    current_summary: str = "",
+    evidence_digest: EvidenceDigest | None = None,
 ) -> str:
     """构造 Coding Agent 的任务消息。"""
 
-    reports = [report.model_dump(mode="json") for report in explore_reports]
     return f"""
 请完成下面的 CodingTask。
 
 仓库根目录：
 {repo_path}
-
-当前工作流摘要：
-{current_summary or "暂无"}
 
 规范化 Issue：
 {issue.model_dump_json(indent=2)}
@@ -62,8 +55,8 @@ def build_coding_input(
 CodingTask：
 {coding_task.model_dump_json(indent=2)}
 
-Explore Reports：
-{json.dumps(reports, ensure_ascii=False, indent=2) if reports else "暂无"}
+EvidenceDigest：
+{evidence_digest.model_dump_json(indent=2) if evidence_digest else "暂无"}
 
 执行要求：
 1. 只围绕 CodingTask 读取和修改代码。

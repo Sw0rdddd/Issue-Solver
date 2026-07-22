@@ -38,7 +38,7 @@ def build_explore_node(explore_agent_factory: Callable[[str], Any]):
             user_message = build_explore_input(
                 issue=issue,
                 focus=focus,
-                current_summary=state.get("current_summary", ""),
+                evidence_digest=state.get("evidence_digest"),
             )
 
             try:

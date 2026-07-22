@@ -147,8 +147,7 @@ def build_coding_node(
                 repo_path=repo_path,
                 issue=issue,
                 coding_task=coding_task,
-                explore_reports=state.get("explore_reports", []),
-                current_summary=state.get("current_summary", ""),
+                evidence_digest=state.get("evidence_digest"),
             )
             try:
                 response = invoke_tool_agent(

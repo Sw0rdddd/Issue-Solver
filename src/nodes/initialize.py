@@ -10,6 +10,7 @@ from services.project_detector import (
 from services.repository import (
     find_repo_root,
     get_current_commit,
+    get_repository_profile,
     is_worktree_clean,
 )
 from services.python_environment import discover_python_environment
@@ -51,6 +52,8 @@ def initialize_node(state: ResolverState) -> dict:
         if project_type == "unknown":
             raise RuntimeError("无法识别项目类型，第一版仅支持 Python 项目。")
 
+        repository_profile = get_repository_profile(repo_root)
+
         # 识别基础测试命令，例如 pytest -q。
         test_commands = detect_test_commands(repo_root)
         if not test_commands:
@@ -62,6 +65,7 @@ def initialize_node(state: ResolverState) -> dict:
             "project_type": project_type,
             "test_commands": test_commands,
             "environment": environment,
+            "repository_profile": repository_profile,
             "phase": "PARSE_ISSUE",
         }
 

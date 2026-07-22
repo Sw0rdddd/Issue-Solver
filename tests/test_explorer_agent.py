@@ -2,6 +2,7 @@ from langchain.agents.structured_output import ToolStrategy
 
 from agents import explorer
 from prompts.explorer import build_explore_input
+from schemas.evidence_digest import EvidenceDigest
 from schemas.explore_report import ExploreReport
 from schemas.issue_specification import IssueSpec
 
@@ -94,8 +95,15 @@ def test_explore_input_uses_bound_repo_context() -> None:
     content = build_explore_input(
         issue=IssueSpec(title="查询失败", body="应返回空列表"),
         focus="定位查询逻辑",
-        current_summary="等待探索",
+        evidence_digest=EvidenceDigest(
+            source_report_count=1,
+            root_cause="src/query.py:8 未处理空值",
+            key_evidence=["src/query.py:8 直接使用空值"],
+            relevant_files=["src/query.py"],
+        ),
     )
 
     assert "所有工具已固定在当前仓库" in content
     assert "repo_path" not in content
+    assert "当前 EvidenceDigest" in content
+    assert "未处理空值" in content

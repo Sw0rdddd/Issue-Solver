@@ -10,7 +10,7 @@ flowchart TD
     C -->|通过| D[初始化仓库<br/>确认 Git 基线与 pytest 入口]
 
     D -->|失败| X
-    D -->|通过| E[解析并规范化 Issue]
+    D -->|通过| E[解析 Issue 与目标仓库画像]
     E -->|验收条件为空| E1[受控重试一次]
     E1 -->|仍无法确定| X
     E1 -->|恢复成功| F{Coordinator 决策}
@@ -18,7 +18,7 @@ flowchart TD
 
     F -->|EXPLORE| G[并行只读探索<br/>每批 1 至 3 个目标]
     G -->|探索失败| X
-    G -->|汇总代码证据| F
+    G -->|完整报告落盘并生成增量 EvidenceDigest| F
 
     F -->|CODE| H[生成受限 CodingTask]
     H --> I[Coder 读取代码并应用 Patch]
@@ -57,7 +57,8 @@ flowchart TD
 
 ## 关键准入条件
 
-- 首次 Coordinator 决策必须先探索仓库，不能直接修改代码。
+- 首次 Coordinator 决策必须先探索仓库，不能直接修改代码；它结合目标仓库全部 Git 跟踪文件画像、Issue 范围与证据缺口，自主选择每批 1 至 3 个独立探索目标。
+- 完整 `ExploreReport` 只用于状态审计和产物落盘。Coordinator 仅接收尚未摘要的新报告并生成 `EvidenceDigest`；Coder、后续 Explorer、Reporter 只接收 digest，Reviewer 不接收探索上下文。
 - Explorer 和 Reviewer 的只读工具固定在当前仓库，Reviewer 的 `git_diff` 还固定相对基线 Commit；Coder 没有 Shell 权限，只能在 `allowed_scope` 内应用 Patch。
 - Coding Agent 声明的修改文件必须与 Git 检测到的累计 Diff 完全一致。
 - Test 节点先执行定向测试，只有通过后才执行全量回归；Review 为 `APPROVE` 且本轮测试全绿时直接进入 Finalize，其余结果返回 Coordinator 决定继续探索或返工。

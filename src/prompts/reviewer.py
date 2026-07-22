@@ -1,8 +1,5 @@
-import json
-
 from schemas.coding_result import CodingResult
 from schemas.coding_task import CodingTask
-from schemas.explore_report import ExploreReport
 from schemas.issue_specification import IssueSpec
 
 
@@ -30,17 +27,11 @@ def build_review_input(
     issue: IssueSpec,
     coding_task: CodingTask,
     coding_result: CodingResult,
-    explore_reports: list[ExploreReport],
-    current_summary: str = "",
 ) -> str:
     """构造 Review Agent 的审查消息。"""
 
-    reports = [report.model_dump(mode="json") for report in explore_reports]
     return f"""
 请审查当前代码修改。
-
-当前工作流摘要：
-{current_summary or "暂无"}
 
 规范化 Issue：
 {issue.model_dump_json(indent=2)}
@@ -50,9 +41,6 @@ CodingTask：
 
 CodingResult：
 {coding_result.model_dump_json(indent=2)}
-
-Explore Reports：
-{json.dumps(reports, ensure_ascii=False, indent=2) if reports else "暂无"}
 
 执行要求：
 1. 所有工具已固定在当前仓库；git_diff 已固定相对本轮基线 Commit 比较。

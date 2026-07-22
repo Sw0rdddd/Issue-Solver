@@ -6,6 +6,7 @@ from agents import coder
 from prompts.coder import CODING_SYSTEM_PROMPT, build_coding_input
 from schemas.coding_result import CodingResult
 from schemas.coding_task import CodingTask
+from schemas.evidence_digest import EvidenceDigest
 from schemas.issue_specification import IssueSpec
 
 
@@ -113,14 +114,19 @@ def test_build_coding_input_contains_structured_context() -> None:
         repo_path="C:/repo",
         issue=IssueSpec(title="搜索失败", body="大小写不同无法匹配"),
         coding_task=task,
-        explore_reports=[],
-        current_summary="根因明确",
+        evidence_digest=EvidenceDigest(
+            source_report_count=1,
+            root_cause="search.py:8 比较区分大小写",
+            key_evidence=["search.py:8 直接比较原始字符串"],
+            relevant_files=["search.py"],
+        ),
     )
 
     assert "C:/repo" in content
     assert "搜索失败" in content
     assert "修复搜索" in content
-    assert "根因明确" in content
+    assert "EvidenceDigest" in content
+    assert "直接比较原始字符串" in content
 
 
 def test_coding_read_tools_bind_repo_path(tmp_path) -> None:

@@ -9,6 +9,7 @@ from prompts.coordinator import (
     build_coordinator_input,
 )
 from schemas.coordinator_decision import CoordinatorDecision
+from schemas.evidence_digest import EvidenceDigest
 from schemas.failure import (
     ClassifiedFailure,
     FailureInfo,
@@ -107,6 +108,27 @@ def build_coordinator_node(coordinator_agent: Any):
                 )
 
             explore_reports = state.get("explore_reports", [])
+            evidence_digest = state.get("evidence_digest")
+            if evidence_digest is not None and not isinstance(
+                evidence_digest,
+                EvidenceDigest,
+            ):
+                evidence_digest = EvidenceDigest.model_validate(
+                    evidence_digest
+                )
+            summarized_count = (
+                evidence_digest.source_report_count
+                if evidence_digest is not None
+                else 0
+            )
+            if summarized_count > len(explore_reports):
+                raise ClassifiedFailure(
+                    make_failure(
+                        "INTERNAL",
+                        "EvidenceDigest 覆盖的报告数量超过当前 ExploreReport 数量。",
+                    )
+                )
+            new_explore_reports = explore_reports[summarized_count:]
             repair_round = cycle + 1
             explore_batches_used = (
                 state.get("explore_stage_call", 0)
@@ -136,7 +158,9 @@ def build_coordinator_node(coordinator_agent: Any):
             user_message = build_coordinator_input(
                 issue=issue,
                 current_summary=state.get("current_summary", ""),
-                explore_reports=explore_reports,
+                repository_profile=state.get("repository_profile"),
+                evidence_digest=evidence_digest,
+                new_explore_reports=new_explore_reports,
                 coding_result=state.get("coding_result"),
                 review_result=state.get("review_result"),
                 latest_test_results=latest_test_results,
@@ -188,6 +212,32 @@ def build_coordinator_node(coordinator_agent: Any):
                     )
                 )
 
+            if new_explore_reports:
+                if decision.evidence_digest is None:
+                    raise ClassifiedFailure(
+                        make_failure(
+                            "MODEL",
+                            "Coordinator 未为新增 ExploreReport 返回 EvidenceDigest。",
+                        )
+                    )
+                if (
+                    decision.evidence_digest.source_report_count
+                    != len(explore_reports)
+                ):
+                    raise ClassifiedFailure(
+                        make_failure(
+                            "MODEL",
+                            "EvidenceDigest.source_report_count 与当前 ExploreReport 数量不一致。",
+                        )
+                    )
+            elif decision.evidence_digest is not None:
+                raise ClassifiedFailure(
+                    make_failure(
+                        "MODEL",
+                        "没有新增 ExploreReport 时不得重复生成 EvidenceDigest。",
+                    )
+                )
+
             if force_code and decision.next_action != "CODE":
                 raise ClassifiedFailure(
                     make_failure(
@@ -232,6 +282,8 @@ def build_coordinator_node(coordinator_agent: Any):
                 "current_summary": decision.current_summary,
                 "explore_focuses": [],
             }
+            if new_explore_reports:
+                update["evidence_digest"] = decision.evidence_digest
 
             if decision.next_action == "EXPLORE":
                 is_new_round = state.get("repair_round") != repair_round

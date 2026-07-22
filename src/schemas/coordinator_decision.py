@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from graph.state import NextAction
 from schemas.coding_task import CodingTask
+from schemas.evidence_digest import EvidenceDigest
 from schemas.failure import FailureInfo
 
 
@@ -15,6 +16,7 @@ class CoordinatorDecision(BaseModel):
         max_length=3,
     )
     coding_task: CodingTask | None = None
+    evidence_digest: EvidenceDigest | None = None
     failure: FailureInfo | None = None
 
     @model_validator(mode="after")

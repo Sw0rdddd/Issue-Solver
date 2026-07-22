@@ -91,6 +91,7 @@ def build_report_context(
         for report in (state.get("explore_reports") or [])
         if (filtered := _filtered_explore_report(report)) is not None
     ]
+    evidence_digest = _model_value(state.get("evidence_digest"))
     coding_result = _filtered_coding_result(state.get("coding_result"))
     review_result = _model_value(state.get("review_result"))
     test_values = state.get("latest_test_results")
@@ -111,6 +112,7 @@ def build_report_context(
         "issue": issue,
         "coordinator_summary": state.get("current_summary"),
         "explore_reports": explore_reports,
+        "evidence_digest": evidence_digest,
         "coding": {
             "result": coding_result,
         },
@@ -148,6 +150,7 @@ def build_fallback_report(
     review = context.get("review") or {}
     tests = context.get("tests") or []
     issue_title = issue.get("title") or issue.get("raw_input") or "未获得"
+    evidence_digest = context.get("evidence_digest") or {}
     root_causes = [
         report.get("root_cause")
         for report in context.get("explore_reports", [])
@@ -158,6 +161,10 @@ def build_fallback_report(
         for report in context.get("explore_reports", [])
         for finding in (report.get("findings") or [])
     ]
+    if evidence_digest.get("root_cause"):
+        root_causes = [evidence_digest["root_cause"]]
+    if evidence_digest.get("key_evidence"):
+        findings = evidence_digest["key_evidence"]
     risks = [
         *(coding_result.get("remaining_risks") or []),
         *(review.get("remaining_risks") or []),

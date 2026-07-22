@@ -63,7 +63,12 @@ REPORT_SYSTEM_PROMPT = f"""
 def build_report_input(context: dict[str, Any]) -> str:
     """将程序筛选后的最终状态序列化为 Reporter 输入。"""
 
+    model_context = {
+        key: value
+        for key, value in context.items()
+        if key != "explore_reports"
+    }
     return (
         "请根据以下最终运行状态生成报告。\n\n"
-        + json.dumps(context, ensure_ascii=False, indent=2)
+        + json.dumps(model_context, ensure_ascii=False, indent=2)
     )

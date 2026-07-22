@@ -4,7 +4,6 @@ from agents import reviewer
 from prompts.reviewer import REVIEW_SYSTEM_PROMPT, build_review_input
 from schemas.coding_result import CodingResult
 from schemas.coding_task import CodingTask
-from schemas.explore_report import ExploreReport
 from schemas.issue_specification import IssueSpec
 from schemas.review_result import ReviewResult
 
@@ -118,28 +117,16 @@ def test_build_review_input_contains_structured_context() -> None:
         validation=["已检查累计差异"],
         remaining_risks=[],
     )
-    report = ExploreReport(
-        focus="定位搜索逻辑",
-        relevant_files=["search.py"],
-        relevant_symbols=["search_tasks"],
-        findings=["标题直接使用区分大小写的包含判断"],
-        root_cause="查询和标题未进行大小写归一化",
-        test_targets=["tests/test_search.py"],
-        unknowns=[],
-    )
-
     content = build_review_input(
         issue=issue,
         coding_task=task,
         coding_result=coding_result,
-        explore_reports=[report],
-        current_summary="编码完成，等待审查",
     )
 
     assert "搜索失败" in content
     assert "修复搜索" in content
     assert "统一搜索字符串大小写" in content
-    assert "定位搜索逻辑" in content
-    assert "编码完成，等待审查" in content
+    assert "Explore Reports" not in content
+    assert "EvidenceDigest" not in content
     assert "仓库根目录" not in content
     assert "基础 Commit" not in content

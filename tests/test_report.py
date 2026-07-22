@@ -3,6 +3,7 @@ from pathlib import Path
 from langchain_core.runnables import RunnableLambda
 
 from schemas.coding_result import CodingResult
+from schemas.evidence_digest import EvidenceDigest
 from schemas.explore_report import ExploreReport
 from schemas.failure import make_failure
 from schemas.issue_specification import IssueSpec
@@ -50,6 +51,12 @@ def make_state() -> dict:
             acceptance_criteria=["大小写不同也能匹配"],
         ),
         "current_summary": "修复已通过审查和测试",
+        "evidence_digest": EvidenceDigest(
+            source_report_count=1,
+            root_cause="src/search.py:8 未统一大小写",
+            key_evidence=["src/search.py:8 直接比较原始字符串"],
+            relevant_files=["src/search.py"],
+        ),
         "explore_reports": [
             ExploreReport(
                 focus="定位搜索逻辑",
@@ -123,6 +130,7 @@ def test_report_context_excludes_full_test_logs_and_resolved_command() -> None:
     assert "run_test" not in rendered
     assert "deepseek-reasoner" not in rendered
     assert "diff.patch" not in rendered
+    assert context["evidence_digest"]["source_report_count"] == 1
 
 
 def test_create_run_report_writes_model_markdown(tmp_path: Path) -> None:
@@ -152,6 +160,8 @@ def test_create_run_report_writes_model_markdown(tmp_path: Path) -> None:
     assert '"status": "PASSED"' in messages[1].content
     assert "pytest -q tests/test_search.py" not in messages[1].content
     assert "output_tail" not in messages[1].content
+    assert '"explore_reports"' not in messages[1].content
+    assert '"evidence_digest"' in messages[1].content
 
 
 def test_create_run_report_falls_back_when_agent_fails(tmp_path: Path) -> None:

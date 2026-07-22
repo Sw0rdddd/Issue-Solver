@@ -6,6 +6,7 @@ import pytest
 from services.repository import (
     find_repo_root,
     get_current_commit,
+    get_repository_profile,
     is_worktree_clean,
 )
 
@@ -35,6 +36,16 @@ def test_worktree_cleanliness_includes_untracked_files(git_repo: Path) -> None:
     (git_repo / "untracked.txt").write_text("new\n", encoding="utf-8")
 
     assert is_worktree_clean(git_repo) is False
+
+
+def test_repository_profile_counts_all_tracked_file_types(
+    git_repo: Path,
+) -> None:
+    profile = get_repository_profile(git_repo)
+
+    assert profile.tracked_file_count == 1
+    assert profile.tracked_file_bytes == (git_repo / "tracked.txt").stat().st_size
+    assert profile.file_counts_by_extension == {".txt": 1}
 
 
 def test_find_repo_root_rejects_non_git_directory(tmp_path: Path) -> None:

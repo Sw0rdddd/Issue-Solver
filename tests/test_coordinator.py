@@ -10,9 +10,11 @@ from prompts.coordinator import (
 )
 from schemas.coding_task import CodingTask
 from schemas.coordinator_decision import CoordinatorDecision
+from schemas.evidence_digest import EvidenceDigest
 from schemas.explore_report import ExploreReport
 from schemas.failure import make_failure
 from schemas.issue_specification import IssueSpec
+from schemas.repository_profile import RepositoryProfile
 from schemas.review_result import ReviewResult
 from schemas.test_result import TestResult as ExecutionResult
 
@@ -22,15 +24,28 @@ class FakeCoordinatorAgent:
         self,
         result: CoordinatorDecision | object | None = None,
         error: Exception | None = None,
+        synthesize_digest: bool = True,
     ) -> None:
         self.result = result
         self.error = error
+        self.synthesize_digest = synthesize_digest
         self.calls: list[list[object]] = []
 
     def invoke(self, messages: list[object]) -> object:
         self.calls.append(messages)
         if self.error is not None:
             raise self.error
+        content = messages[-1].content
+        if (
+            self.synthesize_digest
+            and isinstance(self.result, CoordinatorDecision)
+            and self.result.evidence_digest is None
+            and isinstance(content, str)
+            and '"focus":' in content
+        ):
+            return self.result.model_copy(
+                update={"evidence_digest": make_digest(content.count('"focus":'))}
+            )
         return self.result
 
 
@@ -152,6 +167,25 @@ def test_coordinator_prompt_requires_bounded_evidence_based_decisions() -> None:
     assert "test_targets 证据不足且探索预算未耗尽时选择 EXPLORE" in (
         COORDINATOR_SYSTEM_PROMPT
     )
+
+
+def make_digest(source_report_count: int = 1) -> EvidenceDigest:
+    return EvidenceDigest(
+        source_report_count=source_report_count,
+        root_cause="app.py:8 直接遍历 None",
+        key_evidence=["app.py:8 返回值可能为 None"],
+        relevant_files=["app.py"],
+        relevant_symbols=["handle_request"],
+        test_targets=["tests/test_app.py"],
+    )
+
+
+def make_repository_profile() -> RepositoryProfile:
+    return RepositoryProfile(
+        tracked_file_count=8,
+        tracked_file_bytes=4096,
+        file_counts_by_extension={".py": 4, ".toml": 1},
+    )
     assert "预算耗尽后基于已有证据生成最小 CodingTask" in (
         COORDINATOR_SYSTEM_PROMPT
     )
@@ -173,6 +207,11 @@ def test_coordinator_prompt_requires_bounded_evidence_based_decisions() -> None:
         COORDINATOR_SYSTEM_PROMPT
     )
     assert "INPUT（输入）、ENVIRONMENT（环境）、MODEL（模型）" in (
+        COORDINATOR_SYSTEM_PROMPT
+    )
+    assert "Repository Profile" in COORDINATOR_SYSTEM_PROMPT
+    assert "不得无理由默认派发 3 个" in COORDINATOR_SYSTEM_PROMPT
+    assert "EvidenceDigest 是后续角色唯一可见的探索上下文" in (
         COORDINATOR_SYSTEM_PROMPT
     )
 
@@ -302,11 +341,59 @@ def test_coordinator_node_builds_coding_task_after_explore() -> None:
         "next_action": "CODE",
         "current_summary": "根因已明确，进入修改",
         "explore_focuses": [],
+        "evidence_digest": make_digest(),
         "phase": "CODE",
         "coding_task": task,
         "repair_round": 1,
         "coding_stage_call": 3,
     }
+
+
+def test_coordinator_only_receives_reports_not_covered_by_digest() -> None:
+    agent = FakeCoordinatorAgent(
+        result=CoordinatorDecision(
+            next_action="CODE",
+            current_summary="新增证据已合并，进入修改",
+            coding_task=make_coding_task(),
+            evidence_digest=make_digest(source_report_count=2),
+        )
+    )
+
+    result = build_coordinator_node(agent)(
+        {
+            "issue": make_issue(),
+            "cycle": 0,
+            "explore_reports": [make_report("已摘要报告"), make_report("新增报告")],
+            "evidence_digest": make_digest(),
+        }
+    )
+
+    content = agent.calls[0][1].content
+    assert '"focus": "新增报告"' in content
+    assert '"focus": "已摘要报告"' not in content
+    assert result["evidence_digest"].source_report_count == 2
+
+
+def test_coordinator_rejects_new_reports_without_evidence_digest() -> None:
+    agent = FakeCoordinatorAgent(
+        result=CoordinatorDecision(
+            next_action="CODE",
+            current_summary="根因已明确，进入修改",
+            coding_task=make_coding_task(),
+        ),
+        synthesize_digest=False,
+    )
+
+    result = build_coordinator_node(agent)(
+        {
+            "issue": make_issue(),
+            "cycle": 0,
+            "explore_reports": [make_report()],
+        }
+    )
+
+    assert result["status"] == "FAILED"
+    assert "未为新增 ExploreReport 返回 EvidenceDigest" in result["failure"].message
 
 
 def test_coordinator_overrides_model_acceptance_criteria_from_issue() -> None:
@@ -379,6 +466,7 @@ def test_coordinator_forces_code_after_explore_budget_is_used() -> None:
                 next_action="CODE",
                 current_summary="探索预算已用完，进入编码",
                 coding_task=make_coding_task(),
+                evidence_digest=make_digest(),
             ),
         ]
     )
@@ -509,6 +597,7 @@ def test_coordinator_node_allows_finish_after_review_and_test_pass() -> None:
         "next_action": "FINISH",
         "current_summary": "审查和测试均通过",
         "explore_focuses": [],
+        "evidence_digest": make_digest(),
         "phase": "FINALIZE",
     }
 
@@ -548,7 +637,9 @@ def test_coordinator_node_uses_only_current_test_stage_in_prompt() -> None:
     content = build_coordinator_input(
         issue=make_issue(),
         current_summary="准备判断",
-        explore_reports=[make_report()],
+        repository_profile=make_repository_profile(),
+        evidence_digest=None,
+        new_explore_reports=[make_report()],
         coding_result=None,
         review_result=None,
         latest_test_results=[latest_result],
@@ -560,6 +651,8 @@ def test_coordinator_node_uses_only_current_test_stage_in_prompt() -> None:
     assert "[latest] output" not in content
     assert "pytest old" not in content
     assert old_result.command == "pytest old"
+    assert '"tracked_file_count": 8' in content
+    assert '"focus": "定位异常"' in content
 
 
 def test_coordinator_prompt_keeps_failed_test_output_tail() -> None:
@@ -569,7 +662,9 @@ def test_coordinator_prompt_keeps_failed_test_output_tail() -> None:
     content = build_coordinator_input(
         issue=make_issue(),
         current_summary="准备返工",
-        explore_reports=[make_report()],
+        repository_profile=None,
+        evidence_digest=make_digest(),
+        new_explore_reports=[],
         coding_result=None,
         review_result=None,
         latest_test_results=[passed_result, failed_result],

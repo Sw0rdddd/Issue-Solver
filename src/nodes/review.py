@@ -65,8 +65,6 @@ def build_review_node(review_agent_factory: Callable[[str, str], Any]):
                                     issue=issue,
                                     coding_task=coding_task,
                                     coding_result=coding_result,
-                                    explore_reports=state.get("explore_reports", []),
-                                    current_summary=state.get("current_summary", ""),
                                 ),
                             }
                         ]

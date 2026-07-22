@@ -3,10 +3,12 @@ from typing import Annotated, Literal, NotRequired, TypedDict
 
 from schemas.coding_result import CodingResult
 from schemas.coding_task import CodingTask
+from schemas.evidence_digest import EvidenceDigest
 from schemas.environment_info import EnvironmentInfo
 from schemas.explore_report import ExploreReport
 from schemas.failure import FailureInfo
 from schemas.issue_specification import IssueSpec
+from schemas.repository_profile import RepositoryProfile
 from schemas.review_result import ReviewResult
 from schemas.test_result import TestResult
 
@@ -60,6 +62,7 @@ class ResolverState(TypedDict):
     project_type: NotRequired[str]
     test_commands: NotRequired[list[str]]
     environment: NotRequired[EnvironmentInfo]
+    repository_profile: NotRequired[RepositoryProfile]
 
     # Parse Issue 节点写入
     issue: NotRequired[IssueSpec]
@@ -81,6 +84,7 @@ class ResolverState(TypedDict):
     explore_reports: NotRequired[
         Annotated[list[ExploreReport], add]
     ]
+    evidence_digest: NotRequired[EvidenceDigest]
     explore_failures: NotRequired[Annotated[list[FailureInfo], add]]
 
     # Coding 节点写入
