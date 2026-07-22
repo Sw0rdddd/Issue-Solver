@@ -18,18 +18,23 @@ from nodes.initialize import initialize_node
 from nodes.parse_issue import build_parse_issue_node
 from nodes.review import build_review_node
 from nodes.test import build_test_node
+from services.openai_compatible_model import build_non_thinking_model
 
 
 def build_graph(model: BaseChatModel) -> StateGraph:
     """创建并注册当前已实现节点的 StateGraph Builder。"""
 
     builder = StateGraph(ResolverState)
+    non_thinking_model = build_non_thinking_model(model)
 
-    parse_issue_node = build_parse_issue_node(model)
+    parse_issue_node = build_parse_issue_node(non_thinking_model)
     coordinator_agent = build_coordinator_agent(model)
     coordinator_node = build_coordinator_node(coordinator_agent)
     explore_node = build_explore_node(
-        lambda repo_path: build_explore_agent(model, repo_path)
+        lambda repo_path: build_explore_agent(
+            non_thinking_model,
+            repo_path,
+        )
     )
     coding_node = build_coding_node(model)
     review_node = build_review_node(

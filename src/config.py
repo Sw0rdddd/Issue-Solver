@@ -1,74 +1,75 @@
-import os
 from pathlib import Path
-from typing import Literal, cast
+from typing import Annotated, Any, Literal, cast
 
 from dotenv import load_dotenv
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env", override=True)
 
 
-def _optional_text(name: str) -> str | None:
-    value = os.environ.get(name)
-    if value is None:
-        return None
-    normalized = value.strip()
-    return normalized or None
+PositiveInt = Annotated[int, Field(gt=0)]
+PositiveFloat = Annotated[float, Field(gt=0)]
 
 
-def _positive_int(name: str, default: int) -> int:
-    raw = os.environ.get(name, str(default)).strip()
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise ValueError(f"配置 {name} 必须是整数。") from exc
-    if value < 1:
-        raise ValueError(f"配置 {name} 必须大于 0。")
-    return value
-
-
-def _positive_float(name: str, default: float) -> float:
-    raw = os.environ.get(name, str(default)).strip()
-    try:
-        value = float(raw)
-    except ValueError as exc:
-        raise ValueError(f"配置 {name} 必须是数字。") from exc
-    if value <= 0:
-        raise ValueError(f"配置 {name} 必须大于 0。")
-    return value
-
-
-def _reasoning_history_mode() -> Literal["auto", "true", "false"]:
-    value = os.environ.get("REASONING_HISTORY", "auto").strip().lower()
-    if value not in {"auto", "true", "false"}:
-        raise ValueError(
-            "配置 REASONING_HISTORY 必须是 auto、true 或 false。"
-        )
-    return cast(Literal["auto", "true", "false"], value)
-
-
-class Setting:
+class Setting(BaseSettings):
     """统一读取本项目 .env 覆盖后的运行配置。"""
 
-    def __init__(self) -> None:
-        self.API_KEY = _optional_text("API_KEY")
-        self.BASE_URL = _optional_text("BASE_URL")
-        self.MODEL_NAME = _optional_text("MODEL_NAME")
-        self.REASONING_HISTORY = _reasoning_history_mode()
-        self.GITHUB_TOKEN = _optional_text("GITHUB_TOKEN")
-        self.MAX_CYCLES = _positive_int("MAX_CYCLES", 5)
-        self.AGENT_RECURSION_LIMIT = _positive_int(
-            "AGENT_RECURSION_LIMIT",
-            60,
-        )
-        self.MAX_EXPLORE_BATCHES = _positive_int(
-            "MAX_EXPLORE_BATCHES",
-            5,
-        )
-        self.TEST_TIMEOUT = _positive_float("TEST_TIMEOUT", 300.0)
-        self.TEST_TAIL_LINES = _positive_int("TEST_TAIL_LINES", 100)
-        run_root = os.environ.get("RUN_ROOT", ".issue-solver-runs").strip()
-        if not run_root:
+    model_config = SettingsConfigDict(extra="ignore", frozen=True)
+
+    API_KEY: str | None = None
+    BASE_URL: str | None = None
+    MODEL_NAME: str | None = None
+    REASONING_HISTORY: Literal["auto", "true", "false"] = "auto"
+    GITHUB_TOKEN: str | None = None
+    MAX_CYCLES: PositiveInt = 5
+    AGENT_RECURSION_LIMIT: PositiveInt = 60
+    MAX_EXPLORE_BATCHES: PositiveInt = 5
+    TEST_TIMEOUT: PositiveFloat = 300.0
+    TEST_TAIL_LINES: PositiveInt = 100
+    RUN_ROOT: Path = Path(".issue-solver-runs")
+
+    @field_validator(
+        "API_KEY",
+        "BASE_URL",
+        "MODEL_NAME",
+        "GITHUB_TOKEN",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_optional_text(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("配置文本必须是字符串。")
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("REASONING_HISTORY", mode="before")
+    @classmethod
+    def _normalize_reasoning_history(
+        cls,
+        value: Any,
+    ) -> Literal["auto", "true", "false"]:
+        if not isinstance(value, str):
+            raise ValueError(
+                "配置 REASONING_HISTORY 必须是 auto、true 或 false。"
+            )
+        normalized = value.strip().lower()
+        if normalized not in {"auto", "true", "false"}:
+            raise ValueError(
+                "配置 REASONING_HISTORY 必须是 auto、true 或 false。"
+            )
+        return cast(Literal["auto", "true", "false"], normalized)
+
+    @field_validator("RUN_ROOT", mode="before")
+    @classmethod
+    def _normalize_run_root(cls, value: Any) -> Path:
+        if not isinstance(value, (str, Path)):
+            raise ValueError("配置 RUN_ROOT 必须是路径。")
+        normalized = str(value).strip()
+        if not normalized:
             raise ValueError("配置 RUN_ROOT 不能为空。")
-        self.RUN_ROOT = Path(run_root).expanduser()
+        return Path(normalized).expanduser()

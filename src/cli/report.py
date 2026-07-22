@@ -7,6 +7,7 @@ from langchain_core.language_models import BaseChatModel
 from agents.reporter import build_report_agent
 from cli.terminal import TerminalReporter
 from schemas.failure import make_failure
+from services.openai_compatible_model import build_non_thinking_model
 from services.report import ReportResult, create_run_report
 
 
@@ -39,7 +40,11 @@ class RunReportSession:
         self.reporter.start_timing("report")
 
         try:
-            report_agent = build_report_agent(model) if model is not None else None
+            report_agent = (
+                build_report_agent(build_non_thinking_model(model))
+                if model is not None
+                else None
+            )
             result = create_run_report(
                 run_dir=self.run_dir,
                 state=state,

@@ -6,6 +6,8 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
+from pydantic_settings import BaseSettings
 
 from config import PROJECT_ROOT, Setting
 from services.run_store import create_run_id
@@ -61,6 +63,17 @@ def test_setting_reads_runtime_overrides(monkeypatch: pytest.MonkeyPatch) -> Non
     assert setting.TEST_TAIL_LINES == 42
     assert setting.RUN_ROOT == Path("custom-runs")
     assert setting.REASONING_HISTORY == "true"
+
+
+def test_setting_is_frozen_strongly_typed_object() -> None:
+    setting = Setting()
+
+    assert isinstance(setting, BaseSettings)
+    assert isinstance(setting.MAX_CYCLES, int)
+    assert isinstance(setting.TEST_TIMEOUT, float)
+    assert isinstance(setting.RUN_ROOT, Path)
+    with pytest.raises(ValidationError):
+        setting.MAX_CYCLES = 7
 
 
 @pytest.mark.parametrize(

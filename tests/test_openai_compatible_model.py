@@ -5,6 +5,7 @@ from services.openai_compatible_model import (
     NEED_REASONING_HISTORY,
     OpenAICompatibleChatModel,
     build_chat_model,
+    build_non_thinking_model,
     detect_model_provider,
     resolve_reasoning_history,
 )
@@ -245,3 +246,110 @@ def test_qwen_auto_does_not_enable_preserve_thinking() -> None:
 
     assert model.reasoning_history is False
     assert model.extra_body is None
+
+
+@pytest.mark.parametrize(
+    (
+        "model_name",
+        "base_url",
+        "expected_extra_body",
+        "expected_reasoning_effort",
+    ),
+    [
+        (
+            "deepseek-v4-flash",
+            "https://api.deepseek.com",
+            {"thinking": {"type": "disabled"}},
+            None,
+        ),
+        (
+            "glm-4.5",
+            "https://open.bigmodel.cn/api/paas/v4",
+            {"thinking": {"type": "disabled"}},
+            None,
+        ),
+        (
+            "qwen3-max",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            {"enable_thinking": False},
+            None,
+        ),
+        (
+            "gemini-2.5-flash",
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+            None,
+            "none",
+        ),
+        (
+            "gpt-5.2",
+            "https://api.openai.com/v1",
+            None,
+            "none",
+        ),
+    ],
+)
+def test_build_non_thinking_model_uses_supported_provider_parameter(
+    model_name: str,
+    base_url: str,
+    expected_extra_body: dict[str, object] | None,
+    expected_reasoning_effort: str | None,
+) -> None:
+    model = build_chat_model(
+        model=model_name,
+        api_key="test-key",
+        base_url=base_url,
+        reasoning_history_mode="true",
+    )
+
+    disabled_model = build_non_thinking_model(model)
+
+    assert isinstance(disabled_model, OpenAICompatibleChatModel)
+    assert disabled_model is not model
+    assert model.reasoning_history is True
+    assert disabled_model.reasoning_history is False
+    assert disabled_model.extra_body == expected_extra_body
+    assert disabled_model.reasoning_effort == expected_reasoning_effort
+    assert model.extra_body == (
+        {"preserve_thinking": True}
+        if model.provider == "qwen"
+        else None
+    )
+
+    payload = disabled_model._get_request_payload(
+        [HumanMessage(content="测试关闭思考")]
+    )
+    if expected_extra_body is None:
+        assert "extra_body" not in payload
+    else:
+        assert payload["extra_body"] == expected_extra_body
+    assert payload.get("reasoning_effort") == expected_reasoning_effort
+
+
+@pytest.mark.parametrize(
+    ("model_name", "base_url"),
+    [
+        ("deepseek-chat", "https://api.deepseek.com"),
+        ("glm-4.4", "https://open.bigmodel.cn/api/paas/v4"),
+        ("kimi-k2", "https://api.moonshot.cn/v1"),
+        ("mimo-v2-flash", "https://api.xiaomimimo.com/v1"),
+        ("qwq-32b", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+        (
+            "gemini-2.5-pro",
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+        ),
+        ("gpt-5-pro", "https://api.openai.com/v1"),
+        ("custom", "https://example.com/v1"),
+    ],
+)
+def test_build_non_thinking_model_keeps_unsupported_model_unchanged(
+    model_name: str,
+    base_url: str,
+) -> None:
+    model = build_chat_model(
+        model=model_name,
+        api_key="test-key",
+        base_url=base_url,
+        reasoning_history_mode="true",
+    )
+
+    assert build_non_thinking_model(model) is model

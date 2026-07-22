@@ -70,3 +70,38 @@ def test_report_session_only_writes_once(tmp_path: Path) -> None:
     assert second.path is None
     assert second.failure.message == "本次运行的报告已经生成。"
     assert (tmp_path / "report.md").is_file()
+
+
+def test_report_session_uses_non_thinking_model(monkeypatch, tmp_path: Path) -> None:
+    model = object()
+    non_thinking_model = object()
+    received_models: list[object] = []
+
+    monkeypatch.setattr(
+        report_module,
+        "build_non_thinking_model",
+        lambda value: non_thinking_model,
+    )
+    monkeypatch.setattr(
+        report_module,
+        "build_report_agent",
+        lambda value: received_models.append(value) or None,
+    )
+    session = RunReportSession(
+        run_dir=tmp_path,
+        model_name="test-model",
+        reporter=TerminalReporter(quiet=True, stdout=StringIO()),
+    )
+
+    session.finish(
+        state={
+            "run_id": "run_test",
+            "status": "FAILED",
+            "phase": "TEST",
+            "issue_input": "修复问题",
+        },
+        model=model,
+        worktree_status="未修改",
+    )
+
+    assert received_models == [non_thinking_model]

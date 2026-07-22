@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 from collections.abc import Callable, Sequence
+import re
 from typing import Any, Literal
 
 import openai
-from langchain_core.language_models import LanguageModelInput
+from langchain_core.language_models import BaseChatModel, LanguageModelInput
 from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_core.runnables import Runnable
@@ -93,6 +96,94 @@ def resolve_reasoning_history(
     if mode == "false":
         return False
     return NEED_REASONING_HISTORY[provider]
+
+
+def _model_name(model: OpenAICompatibleChatModel) -> str:
+    return model.model_name.strip().lower()
+
+
+def _supports_glm_thinking_disable(model_name: str) -> bool:
+    match = re.match(r"^glm-(\d+)(?:\.(\d+))?", model_name)
+    if match is None:
+        return False
+    major = int(match.group(1))
+    minor = int(match.group(2) or 0)
+    return (major, minor) >= (4, 5)
+
+
+def _supports_openai_thinking_disable(model_name: str) -> bool:
+    match = re.match(r"^gpt-5\.(\d+)", model_name)
+    return (
+        match is not None
+        and int(match.group(1)) >= 1
+        and "-pro" not in model_name
+    )
+
+
+def _with_disabled_thinking_extra_body(
+    model: OpenAICompatibleChatModel,
+    extra_body: dict[str, Any],
+) -> OpenAICompatibleChatModel:
+    current_extra_body = dict(model.extra_body or {})
+    current_extra_body.pop("preserve_thinking", None)
+    current_extra_body.update(extra_body)
+    return model.model_copy(
+        update={
+            "extra_body": current_extra_body,
+            "reasoning_history": False,
+        }
+    )
+
+
+def build_non_thinking_model(model: BaseChatModel) -> BaseChatModel:
+    """为支持关闭思考的模型创建角色专用副本。"""
+
+    if not isinstance(model, OpenAICompatibleChatModel):
+        return model
+
+    model_name = _model_name(model)
+    if model.provider == "deepseek" and model_name.startswith(
+        "deepseek-v4"
+    ):
+        return _with_disabled_thinking_extra_body(
+            model,
+            {"thinking": {"type": "disabled"}},
+        )
+    if (
+        model.provider == "glm"
+        and _supports_glm_thinking_disable(model_name)
+    ):
+        return _with_disabled_thinking_extra_body(
+            model,
+            {"thinking": {"type": "disabled"}},
+        )
+    if model.provider == "qwen" and model_name.startswith("qwen3"):
+        return _with_disabled_thinking_extra_body(
+            model,
+            {"enable_thinking": False},
+        )
+    if (
+        model.provider == "gemini"
+        and model_name.startswith("gemini-2.5-flash")
+        and "lite" not in model_name
+    ):
+        return model.model_copy(
+            update={
+                "reasoning_effort": "none",
+                "reasoning_history": False,
+            }
+        )
+    if (
+        model.provider == "openai"
+        and _supports_openai_thinking_disable(model_name)
+    ):
+        return model.model_copy(
+            update={
+                "reasoning_effort": "none",
+                "reasoning_history": False,
+            }
+        )
+    return model
 
 
 def _reasoning_from_message(message: Any) -> Any | None:

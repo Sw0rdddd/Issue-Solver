@@ -10,6 +10,7 @@ from schemas.test_result import TestResult as ExecutionResult
 
 def test_build_graph_registers_existing_nodes(monkeypatch) -> None:
     model = object()
+    non_thinking_model = object()
     parse_issue_node = lambda state: {"issue": state}
     coordinator_agent = object()
     coordinator_node = lambda state: {"next_action": "EXPLORE"}
@@ -26,6 +27,10 @@ def test_build_graph_registers_existing_nodes(monkeypatch) -> None:
     def fake_build_parse_issue_node(value: object):
         calls.append(("parse_issue", value))
         return parse_issue_node
+
+    def fake_build_non_thinking_model(value: object) -> object:
+        calls.append(("non_thinking_model", value))
+        return non_thinking_model
 
     def fake_build_explore_agent(value: object, repo_path: str):
         calls.append(("explore_agent", (value, repo_path)))
@@ -65,6 +70,11 @@ def test_build_graph_registers_existing_nodes(monkeypatch) -> None:
         builder,
         "build_parse_issue_node",
         fake_build_parse_issue_node,
+    )
+    monkeypatch.setattr(
+        builder,
+        "build_non_thinking_model",
+        fake_build_non_thinking_model,
     )
     monkeypatch.setattr(
         builder,
@@ -109,7 +119,8 @@ def test_build_graph_registers_existing_nodes(monkeypatch) -> None:
         "finalize",
     }
     assert calls == [
-        ("parse_issue", model),
+        ("non_thinking_model", model),
+        ("parse_issue", non_thinking_model),
         ("coordinator_agent", model),
         ("coordinator_node", coordinator_agent),
         ("explore_node", None),
@@ -119,7 +130,7 @@ def test_build_graph_registers_existing_nodes(monkeypatch) -> None:
     assert factories["explore"]("C:/repo") is explore_agent
     assert factories["review"]("C:/repo", "abc123") is review_agent
     assert calls[-2:] == [
-        ("explore_agent", (model, "C:/repo")),
+        ("explore_agent", (non_thinking_model, "C:/repo")),
         ("review_agent", (model, "C:/repo", "abc123")),
     ]
     assert ("__start__", "initialize") in graph.edges
