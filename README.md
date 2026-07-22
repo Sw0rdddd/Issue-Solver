@@ -21,7 +21,7 @@
 
 ## 测评结果
 
-评测集选取 15 个真实开源项目的 GitHub Issue，包括 10 个普通案例和 5 个困难案例；系统对每个案例完成一次端到端运行。测评使用 `deepseek-v4-flash`，时间为 2026-07-21。
+评测集选取 15 个真实开源项目的 GitHub Issue，注意并非SWE-bench的成绩，包括 10 个普通案例和 5 个困难案例；系统对每个案例完成一次端到端运行。测评使用 `deepseek-v4-flash`，时间为 2026-07-21。
 
 <table>
   <thead>
@@ -102,7 +102,7 @@ git -C <target-repo> status --short
 ### 3. 运行修复
 
 ```powershell
-python -m cli.main run --repo <target-repo> --issue <issue-url-or-text>
+uv run python -m cli.main run --repo <target-repo> --issue <issue-url-or-text>
 ```
 
 `--issue` 支持普通文本、GitHub Issue URL，以及绝对路径形式的 UTF-8 Markdown 或文本文件。
