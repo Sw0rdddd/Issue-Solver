@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -148,6 +149,21 @@ def test_parse_issue_node_saves_normalized_issue(
         (tmp_path / "logs" / "issue.json").read_text(encoding="utf-8")
     )
     assert saved == issue.model_dump()
+
+
+def test_parse_issue_node_instruments_structured_runnable() -> None:
+    structured_model = FakeStructuredModel(
+        result=IssueSpec(title="测试", body="正文")
+    )
+    token_usage = Mock()
+    token_usage.with_role.side_effect = lambda runnable, role: runnable
+
+    parse_issue.build_parse_issue_node(
+        FakeModel(structured_model),
+        token_usage,
+    )
+
+    token_usage.with_role.assert_called_once_with(structured_model, "Parser")
 
 
 def test_parse_issue_node_returns_loader_error(

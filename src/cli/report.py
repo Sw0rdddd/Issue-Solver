@@ -9,6 +9,7 @@ from cli.terminal import TerminalReporter
 from schemas.failure import make_failure
 from services.openai_compatible_model import build_non_thinking_model
 from services.report import ReportResult, create_run_report
+from services.token_usage import TokenUsageMonitor
 
 
 @dataclass
@@ -18,6 +19,7 @@ class RunReportSession:
     run_dir: Path
     model_name: str | None
     reporter: TerminalReporter
+    token_usage: TokenUsageMonitor | None = None
     completed: bool = False
 
     def finish(
@@ -40,11 +42,21 @@ class RunReportSession:
         self.reporter.start_timing("report")
 
         try:
-            report_agent = (
-                build_report_agent(build_non_thinking_model(model))
+            report_model = (
+                build_non_thinking_model(model)
                 if model is not None
                 else None
             )
+            report_agent = (
+                build_report_agent(report_model)
+                if report_model is not None
+                else None
+            )
+            if report_agent is not None and self.token_usage is not None:
+                report_agent = self.token_usage.with_role(
+                    report_agent,
+                    "Reporter",
+                )
             result = create_run_report(
                 run_dir=self.run_dir,
                 state=state,

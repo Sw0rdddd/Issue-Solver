@@ -18,6 +18,7 @@ from services.openai_compatible_model import build_chat_model
 from services.python_environment import discover_python_environment
 from services.repository import find_repo_root
 from services.run_store import create_run_id
+from services.token_usage import TokenUsageMonitor
 
 from cli.report import RunReportSession
 from cli.terminal import TerminalReporter
@@ -177,6 +178,7 @@ def run_command(
     args: argparse.Namespace,
     *,
     reporter: TerminalReporter,
+    token_usage: TokenUsageMonitor,
     global_mode: bool = False,
 ) -> int:
     """运行当前已实现的最小 StateGraph。"""
@@ -225,6 +227,7 @@ def run_command(
         run_dir=run_dir,
         model_name=model_name,
         reporter=reporter,
+        token_usage=token_usage,
     )
     report_state: dict[str, Any] = {
         "run_id": run_id,
@@ -307,7 +310,7 @@ def run_command(
             base_url=setting.BASE_URL,
             reasoning_history_mode=setting.REASONING_HISTORY,
         )
-        graph = build_graph(model).compile()
+        graph = build_graph(model, token_usage).compile()
 
         initial_state = {
             **report_state,

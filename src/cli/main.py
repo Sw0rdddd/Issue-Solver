@@ -1,24 +1,11 @@
 import time
 from collections.abc import Sequence
 
-from langchain_core.callbacks import (
-    UsageMetadataCallbackHandler,
-    get_usage_metadata_callback,
-)
-
 from cli.arguments import build_parser
 from cli.run import run_command
 from cli.terminal import TerminalReporter
 from schemas.failure import failure_from_exception
-
-
-def _total_tokens(callback: UsageMetadataCallbackHandler) -> int:
-    """汇总本次运行中所有模型调用上报的 Token。"""
-
-    return sum(
-        usage.get("total_tokens", 0)
-        for usage in callback.usage_metadata.values()
-    )
+from services.token_usage import TokenUsageMonitor
 
 
 def main(
@@ -36,30 +23,31 @@ def main(
             quiet=args.quiet,
             leading_blank=True,
         )
+        token_usage = TokenUsageMonitor()
         started = time.monotonic()
-        with get_usage_metadata_callback() as usage_callback:
-            try:
-                return run_command(
-                    args,
-                    reporter=reporter,
-                    global_mode=global_mode,
-                )
-            except Exception as exc:
-                failure = failure_from_exception(exc, "INTERNAL")
-                reporter.error_block(
-                    "运行失败",
-                    reporter.failure_details(failure),
-                )
-                reporter.set_outcome(
-                    success=False,
-                    result={"failure": failure},
-                )
-                return 1
-            finally:
-                reporter.summary(
-                    total_tokens=_total_tokens(usage_callback),
-                    total_duration=time.monotonic() - started,
-                )
+        try:
+            return run_command(
+                args,
+                reporter=reporter,
+                token_usage=token_usage,
+                global_mode=global_mode,
+            )
+        except Exception as exc:
+            failure = failure_from_exception(exc, "INTERNAL")
+            reporter.error_block(
+                "运行失败",
+                reporter.failure_details(failure),
+            )
+            reporter.set_outcome(
+                success=False,
+                result={"failure": failure},
+            )
+            return 1
+        finally:
+            reporter.summary(
+                token_usage=token_usage.summary(),
+                total_duration=time.monotonic() - started,
+            )
 
     parser.error(f"未知命令：{args.command}")
 

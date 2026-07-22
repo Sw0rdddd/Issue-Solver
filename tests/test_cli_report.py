@@ -1,5 +1,6 @@
 from io import StringIO
 from pathlib import Path
+from unittest.mock import Mock
 
 from cli import report as report_module
 from cli.report import RunReportSession
@@ -75,7 +76,11 @@ def test_report_session_only_writes_once(tmp_path: Path) -> None:
 def test_report_session_uses_non_thinking_model(monkeypatch, tmp_path: Path) -> None:
     model = object()
     non_thinking_model = object()
+    report_agent = object()
+    instrumented_agent = object()
     received_models: list[object] = []
+    token_usage = Mock()
+    token_usage.with_role.return_value = instrumented_agent
 
     monkeypatch.setattr(
         report_module,
@@ -85,12 +90,13 @@ def test_report_session_uses_non_thinking_model(monkeypatch, tmp_path: Path) -> 
     monkeypatch.setattr(
         report_module,
         "build_report_agent",
-        lambda value: received_models.append(value) or None,
+        lambda value: received_models.append(value) or report_agent,
     )
     session = RunReportSession(
         run_dir=tmp_path,
         model_name="test-model",
         reporter=TerminalReporter(quiet=True, stdout=StringIO()),
+        token_usage=token_usage,
     )
 
     session.finish(
@@ -105,3 +111,4 @@ def test_report_session_uses_non_thinking_model(monkeypatch, tmp_path: Path) -> 
     )
 
     assert received_models == [non_thinking_model]
+    token_usage.with_role.assert_called_once_with(report_agent, "Reporter")

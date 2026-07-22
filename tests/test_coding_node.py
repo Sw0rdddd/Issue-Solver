@@ -1,6 +1,7 @@
 import json
 import subprocess
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from langgraph.errors import GraphRecursionError
@@ -118,7 +119,9 @@ def test_coding_node_saves_task_and_final_result_with_rsi(
         return agent
 
     monkeypatch.setattr(coding, "build_coding_agent", fake_build_agent)
-    node = coding.build_coding_node(object())
+    token_usage = Mock()
+    token_usage.with_role.side_effect = lambda agent, role: agent
+    node = coding.build_coding_node(object(), token_usage)
 
     result = node(make_state(git_repo, run_dir))
 
@@ -140,6 +143,7 @@ def test_coding_node_saves_task_and_final_result_with_rsi(
     assert agents[0].configs == [
         {"recursion_limit": Setting().AGENT_RECURSION_LIMIT}
     ]
+    token_usage.with_role.assert_called_once_with(agents[0], "Coder")
 
 
 def test_coding_node_program_generates_error_and_rolls_back(

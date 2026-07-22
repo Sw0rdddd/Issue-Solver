@@ -1,3 +1,5 @@
+from unittest.mock import Mock, call
+
 from graph import builder
 from schemas.coding_result import CodingResult
 from schemas.coding_task import CodingTask
@@ -24,8 +26,8 @@ def test_build_graph_registers_existing_nodes(monkeypatch) -> None:
     calls: list[tuple[str, object]] = []
     factories: dict[str, object] = {}
 
-    def fake_build_parse_issue_node(value: object):
-        calls.append(("parse_issue", value))
+    def fake_build_parse_issue_node(value: object, usage: object | None = None):
+        calls.append(("parse_issue", (value, usage)))
         return parse_issue_node
 
     def fake_build_non_thinking_model(value: object) -> object:
@@ -49,8 +51,8 @@ def test_build_graph_registers_existing_nodes(monkeypatch) -> None:
         calls.append(("explore_node", None))
         return explore_node
 
-    def fake_build_coding_node(value: object):
-        calls.append(("coding_node", value))
+    def fake_build_coding_node(value: object, usage: object | None = None):
+        calls.append(("coding_node", (value, usage)))
         return coding_node
 
     def fake_build_review_agent(
@@ -106,7 +108,10 @@ def test_build_graph_registers_existing_nodes(monkeypatch) -> None:
     monkeypatch.setattr(builder, "build_test_node", lambda: test_node)
     monkeypatch.setattr(builder, "build_finalize_node", lambda: finalize_node)
 
-    graph = builder.build_graph(model)
+    token_usage = Mock()
+    token_usage.with_role.side_effect = lambda value, role: value
+
+    graph = builder.build_graph(model, token_usage)
 
     assert set(graph.nodes) == {
         "initialize",
@@ -120,11 +125,11 @@ def test_build_graph_registers_existing_nodes(monkeypatch) -> None:
     }
     assert calls == [
         ("non_thinking_model", model),
-        ("parse_issue", non_thinking_model),
+        ("parse_issue", (non_thinking_model, token_usage)),
         ("coordinator_agent", model),
         ("coordinator_node", coordinator_agent),
         ("explore_node", None),
-        ("coding_node", model),
+        ("coding_node", (model, token_usage)),
         ("review_node", None),
     ]
     assert factories["explore"]("C:/repo") is explore_agent
@@ -132,6 +137,11 @@ def test_build_graph_registers_existing_nodes(monkeypatch) -> None:
     assert calls[-2:] == [
         ("explore_agent", (non_thinking_model, "C:/repo")),
         ("review_agent", (model, "C:/repo", "abc123")),
+    ]
+    assert token_usage.with_role.call_args_list == [
+        call(coordinator_agent, "Coordinator"),
+        call(explore_agent, "Explorer"),
+        call(review_agent, "Reviewer"),
     ]
     assert ("__start__", "initialize") in graph.edges
     assert ("explore", "coordinator") in graph.edges
@@ -233,7 +243,7 @@ def test_compiled_graph_fans_out_and_joins_explore_nodes(
     monkeypatch.setattr(
         builder,
         "build_parse_issue_node",
-        lambda model: fake_parse_issue_node,
+        lambda model, token_usage=None: fake_parse_issue_node,
     )
     monkeypatch.setattr(
         builder,
@@ -258,7 +268,7 @@ def test_compiled_graph_fans_out_and_joins_explore_nodes(
     monkeypatch.setattr(
         builder,
         "build_coding_node",
-        lambda model: fake_coding_node,
+        lambda model, token_usage=None: fake_coding_node,
     )
     monkeypatch.setattr(builder, "build_review_agent", lambda model: object())
     monkeypatch.setattr(
@@ -344,7 +354,10 @@ def test_compiled_graph_runs_review_test_and_finalize_without_coordinator(
     monkeypatch.setattr(
         builder,
         "build_parse_issue_node",
-        lambda model: lambda state: {"issue": issue, "phase": "COORDINATE"},
+        lambda model, token_usage=None: lambda state: {
+            "issue": issue,
+            "phase": "COORDINATE",
+        },
     )
     monkeypatch.setattr(builder, "build_coordinator_agent", lambda model: object())
 
@@ -392,7 +405,7 @@ def test_compiled_graph_runs_review_test_and_finalize_without_coordinator(
     monkeypatch.setattr(
         builder,
         "build_coding_node",
-        lambda model: lambda state: {
+        lambda model, token_usage=None: lambda state: {
             "phase": "REVIEW",
             "coding_result": CodingResult(
                 success=True,

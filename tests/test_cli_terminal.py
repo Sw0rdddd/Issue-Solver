@@ -6,6 +6,28 @@ from cli.terminal import TerminalReporter
 from schemas.environment_info import EnvironmentInfo
 from schemas.failure import make_failure
 from services.report import ReportResult
+from services.token_usage import RoleTokenUsage, TokenUsageSummary
+
+
+def token_usage(
+    *,
+    total: int = 0,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+) -> TokenUsageSummary:
+    return TokenUsageSummary(
+        total_tokens=total,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_read_tokens=0,
+        role_usages=(
+            RoleTokenUsage(
+                role="Parser",
+                total_tokens=total,
+                percentage=100.0 if total else 0.0,
+            ),
+        ),
+    )
 
 
 class FakeClock:
@@ -312,7 +334,14 @@ def test_summary_keeps_model_tokens_and_result_in_quiet_mode() -> None:
         worktree_status="保留修改",
     )
 
-    reporter.summary(total_tokens=18742, total_duration=48.09)
+    reporter.summary(
+        token_usage=token_usage(
+            total=18742,
+            input_tokens=14106,
+            output_tokens=4636,
+        ),
+        total_duration=48.09,
+    )
 
     text = output.getvalue()
     assert "issue-solver" not in text
@@ -322,7 +351,9 @@ def test_summary_keeps_model_tokens_and_result_in_quiet_mode() -> None:
     assert "run_test" in text
     assert "保留修改" in text
     assert "18,742" in text
+    assert "14,106 / 4,636" in text
     assert "48.09 秒" in text
+    assert text.index("最终耗时") < text.index("Token（总/输入/输出）")
 
 
 def test_error_block_uses_stderr() -> None:
@@ -360,7 +391,7 @@ def test_quiet_summary_does_not_duplicate_leading_blank() -> None:
         width=72,
     )
 
-    reporter.summary(total_tokens=0, total_duration=0.04)
+    reporter.summary(token_usage=token_usage(), total_duration=0.04)
 
     assert output.getvalue().startswith("\n─")
     assert not output.getvalue().startswith("\n\n")
@@ -380,7 +411,7 @@ def test_wide_terminal_keeps_run_directory_on_one_line() -> None:
         repo_path="E:/repo",
         run_dir=run_dir,
     )
-    reporter.summary(total_tokens=0, total_duration=1.0)
+    reporter.summary(token_usage=token_usage(), total_duration=1.0)
 
     assert reporter.width == 120
     assert f"运行目录  {run_dir}" in output.getvalue().splitlines()
@@ -398,11 +429,14 @@ def test_report_result_is_shown_in_progress_and_summary() -> None:
             fallback_used=False,
         )
     )
-    reporter.summary(total_tokens=10, total_duration=1.0)
+    reporter.summary(
+        token_usage=token_usage(total=10, input_tokens=6, output_tokens=4),
+        total_duration=1.0,
+    )
 
     rendered = output.getvalue()
     assert "✓ Report" in rendered
-    assert f"报告      {report_path}" in rendered
+    assert report_path not in rendered.split("运行摘要", maxsplit=1)[1]
 
 
 def test_report_fallback_is_hidden_from_quiet_progress() -> None:
@@ -417,11 +451,11 @@ def test_report_fallback_is_hidden_from_quiet_progress() -> None:
             failure=make_failure("MODEL", "模型不可用"),
         )
     )
-    reporter.summary(total_tokens=0, total_duration=1.0)
+    reporter.summary(token_usage=token_usage(), total_duration=1.0)
 
     rendered = output.getvalue()
     assert "使用程序模板" not in rendered
-    assert "报告      E:/runs/run_test/report.md" in rendered
+    assert "E:/runs/run_test/report.md" not in rendered
 
 
 def test_details_wrap_without_truncating_long_values() -> None:

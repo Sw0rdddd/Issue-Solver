@@ -10,6 +10,7 @@ from typing import Any, TextIO
 from schemas.environment_info import EnvironmentInfo
 from schemas.failure import FailureInfo, make_failure
 from services.report import ReportResult, append_run_result
+from services.token_usage import TokenUsageSummary
 
 
 MAX_TERMINAL_WIDTH = 120
@@ -544,7 +545,12 @@ class TerminalReporter:
         if state.get("failure") is not None:
             self.failure = FailureInfo.model_validate(state["failure"])
 
-    def summary(self, *, total_tokens: int, total_duration: float) -> None:
+    def summary(
+        self,
+        *,
+        token_usage: TokenUsageSummary,
+        total_duration: float,
+    ) -> None:
         passed = sum(item.status == "PASSED" for item in self.test_results)
         test_summary = (
             f"{passed}/{len(self.test_results)} PASSED"
@@ -565,7 +571,7 @@ class TerminalReporter:
                         "changed_files": self.changed_files,
                         "test_summary": test_summary,
                         "worktree_status": self.worktree_status,
-                        "total_tokens": total_tokens,
+                        "token_usage": token_usage,
                         "total_duration": total_duration,
                         "report_generation": self.report_generation,
                         "failure": (
@@ -601,18 +607,21 @@ class TerminalReporter:
             )
         if self.worktree_status:
             self._summary_item("工作区", self.worktree_status)
-        if self.report_path:
-            self._summary_item("报告", self.report_path)
-        self._summary_item("总 Token", f"{total_tokens:,}")
         self._summary_item("最终耗时", f"{total_duration:.2f} 秒")
+        self._summary_item(
+            "Token（总/输入/输出）",
+            f"{token_usage.total_tokens:,} / "
+            f"{token_usage.input_tokens:,} / {token_usage.output_tokens:,}",
+        )
         if self.run_dir:
             self._summary_item("运行目录", self.run_dir)
         self._write(self._rule())
 
     def _summary_item(self, label: str, value: object) -> None:
-        prefix = _pad_display(label, 10)
+        label_width = max(_display_width(label), 10)
+        prefix = _pad_display(label, label_width)
         available = max(self.width - _display_width(prefix), 1)
         lines = _wrap_display(value, available)
         self._write(f"{prefix}{lines[0]}")
         for line in lines[1:]:
-            self._write(f"{' ' * 10}{line}")
+            self._write(f"{' ' * label_width}{line}")

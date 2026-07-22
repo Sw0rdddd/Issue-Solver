@@ -18,6 +18,7 @@ from schemas.failure import (
 from schemas.issue_specification import IssueSpec
 from services.agent_execution import invoke_tool_agent
 from services.artifacts import write_stage_artifact
+from services.token_usage import TokenUsageMonitor
 from tools.coding import (
     CodingToolContext,
     get_coding_iteration_count,
@@ -74,7 +75,10 @@ def _probe_coding_environment(
     return None
 
 
-def build_coding_node(model: BaseChatModel):
+def build_coding_node(
+    model: BaseChatModel,
+    token_usage: TokenUsageMonitor | None = None,
+):
     """创建串行执行 Coding Agent 并确定性检查结果的节点。"""
 
     def coding_node(state: ResolverState) -> dict:
@@ -137,6 +141,8 @@ def build_coding_node(model: BaseChatModel):
                     make_failure("SAFETY", str(exc))
                 ) from exc
             agent = build_coding_agent(model, context)
+            if token_usage is not None:
+                agent = token_usage.with_role(agent, "Coder")
             user_message = build_coding_input(
                 repo_path=repo_path,
                 issue=issue,

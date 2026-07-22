@@ -1,6 +1,5 @@
 import io
 import json
-from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -15,6 +14,7 @@ from config import Setting
 from schemas.environment_info import EnvironmentInfo
 from schemas.failure import ClassifiedFailure, make_failure
 from services.report import ReportResult
+from services.token_usage import RoleTokenUsage, TokenUsageSummary
 
 
 def prepare_runtime(
@@ -28,7 +28,9 @@ def prepare_runtime(
     compiled_graph.with_config.return_value = compiled_graph
     graph_builder = Mock()
     graph_builder.compile.return_value = compiled_graph
-    model_constructor = Mock(return_value=object())
+    model = Mock()
+    model.with_config.return_value = model
+    model_constructor = Mock(return_value=model)
     environment = EnvironmentInfo(
         kind="VENV",
         root_path=str(repo_root / ".venv"),
@@ -260,7 +262,7 @@ def test_environment_failure_stops_before_model_even_when_quiet(
     assert exit_code == 1
     assert "环境预检失败" in captured.err
     assert "未调用 LLM" in captured.err
-    assert "总 Token" in captured.out
+    assert "Token（总/输入/输出）" in captured.out
     assert "0" in captured.out
     model_constructor.assert_not_called()
     failure = (
@@ -331,16 +333,22 @@ def test_run_streams_graph_with_initial_state_and_progress(
     )
     captured_state: dict[str, object] = {}
     configure_success_stream(compiled_graph, captured_state)
-    usage_callback = SimpleNamespace(
-        usage_metadata={
-            "test-model": {"total_tokens": 120},
-            "review-model": {"total_tokens": 30},
-        }
+    token_usage = Mock()
+    token_usage.with_role.side_effect = lambda model, role: model
+    token_usage.summary.return_value = TokenUsageSummary(
+        total_tokens=150,
+        input_tokens=120,
+        output_tokens=30,
+        cache_read_tokens=20,
+        role_usages=(
+            RoleTokenUsage("Parser", 30, 20.0),
+            RoleTokenUsage("Reporter", 120, 80.0),
+        ),
     )
     monkeypatch.setattr(
         main_module,
-        "get_usage_metadata_callback",
-        lambda: nullcontext(usage_callback),
+        "TokenUsageMonitor",
+        lambda: token_usage,
     )
 
     exit_code = main_module.main(
@@ -416,12 +424,13 @@ def test_run_streams_graph_with_initial_state_and_progress(
     assert "run_test" in output
     assert "REVIEW" in output
     assert summary_value(output, "运行目录") == str(run_dir)
-    assert summary_value(output, "报告") == str(run_dir / "report.md")
+    assert "报告      " not in output.split("运行摘要", maxsplit=1)[1]
     assert "150" in output
     assert "最终耗时" in output
     report = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "## 运行结果" in report
-    assert "- 总 Token：150" in report
+    assert "  - Token（总/输入/输出）：150 / 120 / 30" in report
+    assert "    - Reporter：120（80.0%）" in report
     assert f"  - 运行目录：{run_dir}" in report
     assert f"  - 报告：{run_dir / 'report.md'}" in report
 
@@ -454,7 +463,7 @@ def test_quiet_hides_progress_but_keeps_summary(
     assert "运行摘要" in output
     assert "run_test" in output
     assert "REVIEW" in output
-    assert "总 Token" in output
+    assert "Token（总/输入/输出）" in output
     assert "最终耗时" in output
 
 
@@ -627,13 +636,19 @@ def test_run_returns_one_when_graph_raises(
 ) -> None:
     repo_root, compiled_graph, _ = prepare_runtime(monkeypatch, tmp_path)
     compiled_graph.stream.side_effect = RuntimeError("模型不可用")
-    usage_callback = SimpleNamespace(
-        usage_metadata={"test-model": {"total_tokens": 42}}
+    token_usage = Mock()
+    token_usage.with_role.side_effect = lambda model, role: model
+    token_usage.summary.return_value = TokenUsageSummary(
+        total_tokens=42,
+        input_tokens=40,
+        output_tokens=2,
+        cache_read_tokens=None,
+        role_usages=(),
     )
     monkeypatch.setattr(
         main_module,
-        "get_usage_metadata_callback",
-        lambda: nullcontext(usage_callback),
+        "TokenUsageMonitor",
+        lambda: token_usage,
     )
 
     exit_code = main_module.main(

@@ -12,9 +12,13 @@ from schemas.issue_specification import IssueSpec
 from services.artifacts import ensure_run_logs_directory
 from services.issue_loader import load_issue
 from services.structured_output import with_structured_output_retry
+from services.token_usage import TokenUsageMonitor
 
 
-def build_parse_issue_node(model: BaseChatModel):
+def build_parse_issue_node(
+    model: BaseChatModel,
+    token_usage: TokenUsageMonitor | None = None,
+):
     """创建 Parse Issue 节点。"""
 
     structured_model = with_structured_output_retry(
@@ -24,6 +28,8 @@ def build_parse_issue_node(model: BaseChatModel):
             strict=None,
         )
     )
+    if token_usage is not None:
+        structured_model = token_usage.with_role(structured_model, "Parser")
 
     def parse_issue_node(state: ResolverState) -> dict:
         """加载并规范化用户输入的 Issue。"""

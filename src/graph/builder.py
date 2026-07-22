@@ -19,30 +19,56 @@ from nodes.parse_issue import build_parse_issue_node
 from nodes.review import build_review_node
 from nodes.test import build_test_node
 from services.openai_compatible_model import build_non_thinking_model
+from services.token_usage import TokenUsageMonitor
 
 
-def build_graph(model: BaseChatModel) -> StateGraph:
+def build_graph(
+    model: BaseChatModel,
+    token_usage: TokenUsageMonitor | None = None,
+) -> StateGraph:
     """创建并注册当前已实现节点的 StateGraph Builder。"""
 
     builder = StateGraph(ResolverState)
     non_thinking_model = build_non_thinking_model(model)
-
-    parse_issue_node = build_parse_issue_node(non_thinking_model)
-    coordinator_agent = build_coordinator_agent(model)
-    coordinator_node = build_coordinator_node(coordinator_agent)
-    explore_node = build_explore_node(
-        lambda repo_path: build_explore_agent(
-            non_thinking_model,
-            repo_path,
-        )
+    parse_issue_node = build_parse_issue_node(
+        non_thinking_model,
+        token_usage,
     )
-    coding_node = build_coding_node(model)
-    review_node = build_review_node(
-        lambda repo_path, base_commit: build_review_agent(
-            model,
-            repo_path,
-            base_commit,
+    coordinator_agent = build_coordinator_agent(model)
+    if token_usage is not None:
+        coordinator_agent = token_usage.with_role(
+            coordinator_agent,
+            "Coordinator",
         )
+    coordinator_node = build_coordinator_node(coordinator_agent)
+
+    def build_instrumented_explore_agent(repo_path: str):
+        agent = build_explore_agent(non_thinking_model, repo_path)
+        return (
+            token_usage.with_role(agent, "Explorer")
+            if token_usage is not None
+            else agent
+        )
+
+    explore_node = build_explore_node(
+        build_instrumented_explore_agent
+    )
+
+    coding_node = build_coding_node(model, token_usage)
+
+    def build_instrumented_review_agent(
+        repo_path: str,
+        base_commit: str,
+    ):
+        agent = build_review_agent(model, repo_path, base_commit)
+        return (
+            token_usage.with_role(agent, "Reviewer")
+            if token_usage is not None
+            else agent
+        )
+
+    review_node = build_review_node(
+        build_instrumented_review_agent
     )
     test_node = build_test_node()
     finalize_node = build_finalize_node()

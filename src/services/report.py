@@ -8,6 +8,7 @@ from langchain_core.runnables import Runnable
 from pydantic import BaseModel
 
 from schemas.failure import FailureInfo, make_failure
+from services.token_usage import TokenUsageSummary
 from prompts.reporter import (
     REPORT_REQUIRED_LABELS,
     REPORT_SECTION_HEADINGS,
@@ -207,6 +208,20 @@ def append_run_result(
     failure = summary.get("failure") or {}
     run_dir = summary.get("run_dir") or "未获得"
     logs_dir = str(Path(run_dir) / "logs") if run_dir != "未获得" else "未获得"
+    token_usage = summary.get("token_usage")
+    if not isinstance(token_usage, TokenUsageSummary):
+        token_usage = TokenUsageSummary(
+            total_tokens=0,
+            input_tokens=0,
+            output_tokens=0,
+            cache_read_tokens=None,
+            role_usages=(),
+        )
+    cache_read_tokens = (
+        f"{token_usage.cache_read_tokens:,}"
+        if token_usage.cache_read_tokens is not None
+        else "未提供"
+    )
     lines = [
         "",
         "## 运行结果",
@@ -223,7 +238,17 @@ def append_run_result(
         f"- 失败类型：{failure.get('type') or '无'}",
         f"- 失败原因：{failure.get('message') or '无'}",
         f"- 处理建议：{failure.get('suggestion') or '无'}",
-        f"- 总 Token：{int(summary.get('total_tokens') or 0):,}",
+        "- Token 监控：",
+        "  - Token（总/输入/输出）："
+        f"{token_usage.total_tokens:,} / {token_usage.input_tokens:,} / "
+        f"{token_usage.output_tokens:,}",
+        f"  - 缓存命中 Token：{cache_read_tokens}（已包含在输入 Token 内）",
+        "  - 角色分布：",
+        *[
+            "    - "
+            f"{usage.role}：{usage.total_tokens:,}（{usage.percentage:.1f}%）"
+            for usage in token_usage.role_usages
+        ],
         f"- 最终耗时：{float(summary.get('total_duration') or 0):.2f} 秒",
         f"- 报告生成：{summary.get('report_generation') or '程序模板'}",
         "- 产物地址：",

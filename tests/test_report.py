@@ -13,6 +13,7 @@ from services.report import (
     build_report_context,
     create_run_report,
 )
+from services.token_usage import RoleTokenUsage, TokenUsageSummary
 
 
 def valid_report_markdown() -> str:
@@ -253,7 +254,24 @@ def test_append_run_result_adds_deterministic_terminal_summary(
             "changed_files": ["src/search.py"],
             "test_summary": "1/1 PASSED",
             "worktree_status": "保留修改",
-            "total_tokens": 12345,
+            "token_usage": TokenUsageSummary(
+                total_tokens=12345,
+                input_tokens=9000,
+                output_tokens=3345,
+                cache_read_tokens=456,
+                role_usages=(
+                    RoleTokenUsage(
+                        role="Parser",
+                        total_tokens=225,
+                        percentage=1.8,
+                    ),
+                    RoleTokenUsage(
+                        role="Coordinator",
+                        total_tokens=12120,
+                        percentage=98.2,
+                    ),
+                ),
+            ),
             "total_duration": 48.09,
             "report_generation": "模型",
             "failure": {
@@ -268,7 +286,10 @@ def test_append_run_result_adds_deterministic_terminal_summary(
 
     report = report_path.read_text(encoding="utf-8")
     assert report.index("## 运行结果") > report.index("## 风险")
-    assert "- 总 Token：12,345" in report
+    assert "  - Token（总/输入/输出）：12,345 / 9,000 / 3,345" in report
+    assert "  - 缓存命中 Token：456（已包含在输入 Token 内）" in report
+    assert "    - Parser：225（1.8%）" in report
+    assert "    - Coordinator：12,120（98.2%）" in report
     assert "- 最终耗时：48.09 秒" in report
     assert "- 失败类型：SOLUTION" in report
     assert "- 失败原因：修复未完成" in report

@@ -248,7 +248,7 @@ Review 后仍会执行真实测试，而不是只依赖 Review 结论。Coordina
 
 LangGraph 结束且交互式回滚决策完成后，CLI 执行独立的 Report 收尾。Reporter 不绑定任何工具，只生成问题、修改验证和风险总结；完整测试日志、确定性运行字段和产物地址不会进入 Reporter 上下文。
 
-报告以 UTF-8 保存为运行目录根部的 `report.md`。终端完成时，程序在总结末尾追加 `## 运行结果`，写入 Token、耗时和产物地址；模型不可用时使用程序总结模板。
+报告以 UTF-8 保存为运行目录根部的 `report.md`。终端完成时，程序在总结末尾追加 `## 运行结果`，写入总/输入/输出 Token、缓存命中以及 Parser、Coordinator、Explorer、Coder、Reviewer、Reporter 的 Token 分布、耗时和产物地址；模型未返回缓存字段时明确显示“未提供”。终端摘要显示总/输入/输出 Token；模型不可用时使用程序总结模板。
 
 ## 6. 重要数据结构
 
