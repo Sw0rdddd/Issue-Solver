@@ -5,6 +5,7 @@ from prompts.explorer import build_explore_input
 from schemas.evidence_digest import EvidenceDigest
 from schemas.explore_report import ExploreReport
 from schemas.issue_specification import IssueSpec
+from services.tool_history import ToolHistoryWindowMiddleware
 
 
 def test_build_explore_agent_uses_tool_strategy(monkeypatch) -> None:
@@ -54,6 +55,9 @@ def test_build_explore_agent_uses_tool_strategy(monkeypatch) -> None:
     assert isinstance(response_format, ToolStrategy)
     assert response_format.schema is ExploreReport
     assert response_format.handle_errors is True
+    middleware = captured["middleware"]
+    assert len(middleware) == 1
+    assert isinstance(middleware[0], ToolHistoryWindowMiddleware)
     assert "git_log" in captured["system_prompt"]
     assert "git_show" in captured["system_prompt"]
     assert "list_files 或搜索结果被截断" in captured["system_prompt"]

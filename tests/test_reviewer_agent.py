@@ -6,6 +6,7 @@ from schemas.coding_result import CodingResult
 from schemas.coding_task import CodingTask
 from schemas.issue_specification import IssueSpec
 from schemas.review_result import ReviewResult
+from services.tool_history import ToolHistoryWindowMiddleware
 
 
 def test_build_review_agent_uses_only_read_only_tools(monkeypatch) -> None:
@@ -53,6 +54,9 @@ def test_build_review_agent_uses_only_read_only_tools(monkeypatch) -> None:
     assert "base_commit" not in tools["git_diff"].args_schema.model_fields
     assert captured["system_prompt"] == REVIEW_SYSTEM_PROMPT
     assert captured["name"] == "review_agent"
+    middleware = captured["middleware"]
+    assert len(middleware) == 1
+    assert isinstance(middleware[0], ToolHistoryWindowMiddleware)
     response_format = captured["response_format"]
     assert isinstance(response_format, ToolStrategy)
     assert response_format.schema is ReviewResult

@@ -4,9 +4,11 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool, tool
 
 from agents.read_tools import build_bound_read_tools
+from config import Setting
 from prompts.explorer import EXPLORE_SYSTEM_PROMPT
 from schemas.explore_report import ExploreReport
 from services.structured_output import with_agent_structured_output_retry
+from services.tool_history import ToolHistoryWindowMiddleware
 from tools.git import git_log, git_show
 
 
@@ -53,6 +55,9 @@ def build_explore_agent(model: BaseChatModel, repo_path: str):
         tools=build_explore_tools(repo_path),
         system_prompt=EXPLORE_SYSTEM_PROMPT,
         response_format=ToolStrategy(ExploreReport, handle_errors=True),
+        middleware=[
+            ToolHistoryWindowMiddleware(Setting().AGENT_RECURSION_LIMIT)
+        ],
         name="explore_agent",
     )
     return with_agent_structured_output_retry(

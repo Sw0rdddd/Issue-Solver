@@ -4,8 +4,10 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
 
 from agents.read_tools import build_bound_read_tools
+from config import Setting
 from prompts.coder import CODING_SYSTEM_PROMPT
 from schemas.coding_result import CodingResult
+from services.tool_history import ToolHistoryWindowMiddleware
 from tools.coding import CodingToolContext, build_coding_tools
 
 
@@ -33,5 +35,8 @@ def build_coding_agent(
         ],
         system_prompt=CODING_SYSTEM_PROMPT,
         response_format=ToolStrategy(CodingResult, handle_errors=True),
+        middleware=[
+            ToolHistoryWindowMiddleware(Setting().AGENT_RECURSION_LIMIT)
+        ],
         name="coding_agent",
     )

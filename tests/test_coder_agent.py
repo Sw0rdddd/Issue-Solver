@@ -8,6 +8,7 @@ from schemas.coding_result import CodingResult
 from schemas.coding_task import CodingTask
 from schemas.evidence_digest import EvidenceDigest
 from schemas.issue_specification import IssueSpec
+from services.tool_history import ToolHistoryWindowMiddleware
 
 
 def test_build_coding_agent_uses_only_bound_coding_tools(monkeypatch) -> None:
@@ -48,6 +49,9 @@ def test_build_coding_agent_uses_only_bound_coding_tools(monkeypatch) -> None:
     ]
     assert captured["system_prompt"] == CODING_SYSTEM_PROMPT
     assert captured["name"] == "coding_agent"
+    middleware = captured["middleware"]
+    assert len(middleware) == 1
+    assert isinstance(middleware[0], ToolHistoryWindowMiddleware)
     response_format = captured["response_format"]
     assert isinstance(response_format, ToolStrategy)
     assert response_format.schema is CodingResult
