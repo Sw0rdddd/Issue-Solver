@@ -65,6 +65,18 @@ def _dump_model(value: BaseModel | None) -> str:
     )
 
 
+def _dump_test_results(results: list[TestResult]) -> str:
+    """序列化测试摘要，避免通过测试的日志占用 Coordinator 上下文。"""
+
+    payloads = []
+    for result in results:
+        payload = result.model_dump(mode="json")
+        if result.status == "PASSED":
+            del payload["output_tail"]
+        payloads.append(payload)
+    return json.dumps(payloads, ensure_ascii=False, indent=2)
+
+
 def build_coordinator_input(
     issue: IssueSpec,
     current_summary: str,
@@ -108,6 +120,6 @@ Coding Result：
 Review Result：
 {_dump_model(review_result)}
 
-本轮 Test Results（output_tail 是可提供给你的唯一测试输出）：
-{json.dumps([result.model_dump(mode="json") for result in latest_test_results], ensure_ascii=False, indent=2) if latest_test_results else "暂无"}
+本轮 Test Results（仅失败测试附带 output_tail；它是唯一测试输出）：
+{_dump_test_results(latest_test_results) if latest_test_results else "暂无"}
 """.strip()

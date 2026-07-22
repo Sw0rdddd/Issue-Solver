@@ -49,7 +49,9 @@ class TestResult(BaseModel):
     )
     stdout_path: NonEmptyText = Field(description="完整标准输出日志路径")
     stderr_path: NonEmptyText = Field(description="完整错误输出日志路径")
-    output_tail: OutputTail = Field(description="提供给 Coordinator 的日志尾部")
+    output_tail: OutputTail = Field(
+        description="受限测试日志尾部；仅失败结果传给 Coordinator"
+    )
     failure: FailureInfo | None = None
 
     @model_validator(mode="after")

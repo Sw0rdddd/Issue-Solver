@@ -557,8 +557,30 @@ def test_coordinator_node_uses_only_current_test_stage_in_prompt() -> None:
     )
 
     assert "pytest latest" in content
+    assert "[latest] output" not in content
     assert "pytest old" not in content
     assert old_result.command == "pytest old"
+
+
+def test_coordinator_prompt_keeps_failed_test_output_tail() -> None:
+    passed_result = make_test_result("PASSED", "passed")
+    failed_result = make_test_result("FAILED", "failed")
+
+    content = build_coordinator_input(
+        issue=make_issue(),
+        current_summary="准备返工",
+        explore_reports=[make_report()],
+        coding_result=None,
+        review_result=None,
+        latest_test_results=[passed_result, failed_result],
+        cycle=1,
+        max_cycles=5,
+    )
+
+    assert "pytest passed" in content
+    assert "[passed] output" not in content
+    assert "pytest failed" in content
+    assert "[failed] output" in content
 
 
 @pytest.mark.parametrize(
