@@ -5,6 +5,7 @@ from nodes import test as test_node_module
 from schemas.coding_task import CodingTask
 from schemas.environment_info import EnvironmentInfo
 from schemas.failure import make_failure
+from schemas.review_result import ReviewResult
 from schemas.test_result import TestResult as ExecutionResult
 
 
@@ -66,6 +67,12 @@ def make_state(tmp_path: Path) -> dict:
             test_targets=["tests/test_sample.py::test_value"],
         ),
         "test_commands": ["pytest one", "pytest two"],
+        "review_result": ReviewResult(
+            verdict="APPROVE",
+            issues=[],
+            suggestions=[],
+            remaining_risks=[],
+        ),
         "environment": EnvironmentInfo(
             kind="VENV",
             root_path="C:/repo/.venv",
@@ -169,6 +176,36 @@ def test_test_node_runs_all_regression_commands_after_targeted_pass(
         item.status == "PASSED"
         for item in result["latest_test_results"]
     )
+    assert result["next_action"] == "FINISH"
+    assert result["phase"] == "FINALIZE"
+
+
+def test_test_node_returns_to_coordinator_when_review_requests_changes(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        test_node_module,
+        "worktree_fingerprint",
+        lambda repo_path, base_commit: "unchanged",
+    )
+    monkeypatch.setattr(
+        test_node_module,
+        "execute_test_command",
+        lambda **kwargs: make_result(tmp_path),
+    )
+    state = make_state(tmp_path)
+    state["review_result"] = ReviewResult(
+        verdict="REQUEST_CHANGES",
+        issues=["缺少边界条件测试"],
+        suggestions=[],
+        remaining_risks=[],
+    )
+
+    result = test_node_module.build_test_node()(state)
+
+    assert result["phase"] == "COORDINATE"
+    assert result.get("next_action") is None
 
 
 def test_test_node_marks_worktree_mutation_for_rollback(

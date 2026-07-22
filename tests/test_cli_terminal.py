@@ -142,6 +142,7 @@ def test_reporter_displays_review_test_and_finalize_results() -> None:
     reporter.handle_update(
         "test",
         {
+            "next_action": "FINISH",
             "latest_test_results": [
                 SimpleNamespace(
                     status="PASSED",
@@ -179,11 +180,6 @@ def test_reporter_displays_review_test_and_finalize_results() -> None:
             ]
         },
     )
-    clock.advance(0.75)
-    reporter.handle_update(
-        "coordinator",
-        {"next_action": "FINISH", "repair_round": 1},
-    )
     clock.advance(0.1)
     reporter.handle_update(
         "finalize",
@@ -201,7 +197,8 @@ def test_reporter_displays_review_test_and_finalize_results() -> None:
     assert "stdout" not in text
     assert "stderr" not in text
     assert "✓ Test 完成 · 4.50 秒" in text
-    assert "✓ FINISH · 0.75 秒" in text
+    assert "Coordinator" not in text
+    assert "✓ FINISH" not in text
     assert "✓ Finalize · 0.10 秒" in text
     assert "E:/runs/run_test/final.patch" in text
 

@@ -1,4 +1,5 @@
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 from config import Setting
@@ -19,7 +20,7 @@ def _agent_report(result: ReviewResult | None) -> dict | None:
     return result.model_dump(mode="json")
 
 
-def build_review_node(review_agent: Any):
+def build_review_node(review_agent_factory: Callable[[str, str], Any]):
     """创建只读审查累计代码修改的 LangGraph 节点。"""
 
     def review_node(state: ResolverState) -> dict:
@@ -51,6 +52,7 @@ def build_review_node(review_agent: Any):
                 raise RuntimeError("State 中缺少 repo_path。")
             if not base_commit:
                 raise RuntimeError("State 中缺少 base_commit。")
+            review_agent = review_agent_factory(repo_path, base_commit)
 
             try:
                 response = invoke_tool_agent(
@@ -60,8 +62,6 @@ def build_review_node(review_agent: Any):
                             {
                                 "role": "user",
                                 "content": build_review_input(
-                                    repo_path=repo_path,
-                                    base_commit=base_commit,
                                     issue=issue,
                                     coding_task=coding_task,
                                     coding_result=coding_result,

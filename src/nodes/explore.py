@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Any
 
 from config import Setting
@@ -9,7 +10,7 @@ from services.agent_execution import invoke_tool_agent
 from services.artifacts import write_stage_artifact
 
 
-def build_explore_node(explore_agent: Any):
+def build_explore_node(explore_agent_factory: Callable[[str], Any]):
     """创建调用 Explore Agent 的 LangGraph 节点。"""
 
     def explore_node(state: ResolverState) -> dict:
@@ -22,14 +23,19 @@ def build_explore_node(explore_agent: Any):
                 raise ClassifiedFailure(
                     make_failure("INTERNAL", "State 中缺少规范化后的 Issue。")
                 )
+            repo_path = state.get("repo_path")
+            if not repo_path:
+                raise ClassifiedFailure(
+                    make_failure("INTERNAL", "State 中缺少 repo_path。")
+                )
 
             focus = state.get(
                 "explore_focus",
                 "定位与 Issue 相关的代码、潜在根因和测试位置",
             )
+            explore_agent = explore_agent_factory(repo_path)
 
             user_message = build_explore_input(
-                repo_path=state["repo_path"],
                 issue=issue,
                 focus=focus,
                 current_summary=state.get("current_summary", ""),

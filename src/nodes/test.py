@@ -121,6 +121,20 @@ def build_test_node():
                         ),
                     }
                 )
+            else:
+                review_result = state.get("review_result")
+                if (
+                    review_result is not None
+                    and review_result.verdict == "APPROVE"
+                    and results
+                    and all(result.status == "PASSED" for result in results)
+                ):
+                    update.update(
+                        {
+                            "next_action": "FINISH",
+                            "phase": "FINALIZE",
+                        }
+                    )
             return update
 
         except Exception as exc:

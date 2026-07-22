@@ -2,7 +2,11 @@ import pytest
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
-from graph.routing import route_after_coordinator, route_after_step
+from graph.routing import (
+    route_after_coordinator,
+    route_after_step,
+    route_after_test,
+)
 from graph.state import ResolverState
 from schemas.failure import make_failure
 from schemas.explore_report import ExploreReport
@@ -23,6 +27,12 @@ def make_report() -> ExploreReport:
 def test_route_after_step_fails_closed() -> None:
     assert route_after_step({"status": "RUNNING"}) == "CONTINUE"
     assert route_after_step({"status": "FAILED"}) == "FAILED"
+
+
+def test_route_after_test_finishes_only_after_test_node_marks_success() -> None:
+    assert route_after_test({"next_action": "FINISH"}) == "FINALIZE"
+    assert route_after_test({"next_action": "CODE"}) == "COORDINATOR"
+    assert route_after_test({"status": "FAILED", "next_action": "FINISH"}) == "FAILED"
 
 
 def test_route_after_coordinator_dispatches_send_branches() -> None:

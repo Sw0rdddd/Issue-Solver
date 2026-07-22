@@ -6,6 +6,7 @@ from graph.state import NextAction, ResolverState
 
 
 StepRoute = Literal["CONTINUE", "FAILED"]
+TestRoute = Literal["COORDINATOR", "FINALIZE", "FAILED"]
 
 
 def route_after_step(state: ResolverState) -> StepRoute:
@@ -14,6 +15,16 @@ def route_after_step(state: ResolverState) -> StepRoute:
     if state.get("status") == "FAILED":
         return "FAILED"
     return "CONTINUE"
+
+
+def route_after_test(state: ResolverState) -> TestRoute:
+    """测试通过并获 Review 批准时直接收尾，否则交回 Coordinator。"""
+
+    if state.get("status") == "FAILED":
+        return "FAILED"
+    if state.get("next_action") == "FINISH":
+        return "FINALIZE"
+    return "COORDINATOR"
 
 
 def route_after_coordinator(

@@ -21,13 +21,14 @@ def test_build_graph_registers_existing_nodes(monkeypatch) -> None:
     test_node = lambda state: {"phase": "COORDINATE"}
     finalize_node = lambda state: {"phase": "FINALIZE"}
     calls: list[tuple[str, object]] = []
+    factories: dict[str, object] = {}
 
     def fake_build_parse_issue_node(value: object):
         calls.append(("parse_issue", value))
         return parse_issue_node
 
-    def fake_build_explore_agent(value: object):
-        calls.append(("explore_agent", value))
+    def fake_build_explore_agent(value: object, repo_path: str):
+        calls.append(("explore_agent", (value, repo_path)))
         return explore_agent
 
     def fake_build_coordinator_agent(value: object):
@@ -39,19 +40,25 @@ def test_build_graph_registers_existing_nodes(monkeypatch) -> None:
         return coordinator_node
 
     def fake_build_explore_node(value: object):
-        calls.append(("explore_node", value))
+        factories["explore"] = value
+        calls.append(("explore_node", None))
         return explore_node
 
     def fake_build_coding_node(value: object):
         calls.append(("coding_node", value))
         return coding_node
 
-    def fake_build_review_agent(value: object):
-        calls.append(("review_agent", value))
+    def fake_build_review_agent(
+        value: object,
+        repo_path: str,
+        base_commit: str,
+    ):
+        calls.append(("review_agent", (value, repo_path, base_commit)))
         return review_agent
 
     def fake_build_review_node(value: object):
-        calls.append(("review_node", value))
+        factories["review"] = value
+        calls.append(("review_node", None))
         return review_node
 
     monkeypatch.setattr(
@@ -105,11 +112,15 @@ def test_build_graph_registers_existing_nodes(monkeypatch) -> None:
         ("parse_issue", model),
         ("coordinator_agent", model),
         ("coordinator_node", coordinator_agent),
-        ("explore_agent", model),
-        ("explore_node", explore_agent),
+        ("explore_node", None),
         ("coding_node", model),
-        ("review_agent", model),
-        ("review_node", review_agent),
+        ("review_node", None),
+    ]
+    assert factories["explore"]("C:/repo") is explore_agent
+    assert factories["review"]("C:/repo", "abc123") is review_agent
+    assert calls[-2:] == [
+        ("explore_agent", (model, "C:/repo")),
+        ("review_agent", (model, "C:/repo", "abc123")),
     ]
     assert ("__start__", "initialize") in graph.edges
     assert ("explore", "coordinator") in graph.edges
@@ -282,7 +293,7 @@ def test_compiled_graph_fans_out_and_joins_explore_nodes(
     assert coding_calls == [coding_task]
 
 
-def test_compiled_graph_runs_review_test_coordinator_and_finalize(
+def test_compiled_graph_runs_review_test_and_finalize_without_coordinator(
     monkeypatch,
 ) -> None:
     issue = IssueSpec(title="查询失败", body="应返回空列表")
@@ -341,8 +352,8 @@ def test_compiled_graph_runs_review_test_coordinator_and_finalize(
                 "repair_round": 1,
                 "coding_stage_call": 1,
             }
-        calls.append("coordinator_after_test")
-        return {"next_action": "FINISH", "phase": "FINALIZE"}
+        calls.append("unexpected_coordinator_after_test")
+        raise AssertionError("测试通过后不应再次调用 Coordinator")
 
     monkeypatch.setattr(
         builder,
@@ -396,7 +407,8 @@ def test_compiled_graph_runs_review_test_coordinator_and_finalize(
         builder,
         "build_test_node",
         lambda: lambda state: {
-            "phase": "COORDINATE",
+            "phase": "FINALIZE",
+            "next_action": "FINISH",
             "cycle": 1,
             "test_results": [test_result],
             "latest_test_results": [test_result],
@@ -428,7 +440,7 @@ def test_compiled_graph_runs_review_test_coordinator_and_finalize(
         }
     )
 
-    assert calls == ["coordinator_after_test"]
+    assert calls == []
     assert result["status"] == "FINISHED"
     assert result["phase"] == "FINALIZE"
     assert result["diff_path"] == "diff.patch"

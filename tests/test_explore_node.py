@@ -32,6 +32,10 @@ class FakeExploreAgent:
         return self.result
 
 
+def build_agent_factory(agent: FakeExploreAgent):
+    return lambda repo_path: agent
+
+
 def make_issue() -> IssueSpec:
     return IssueSpec(
         title="空结果查询失败",
@@ -63,7 +67,13 @@ def test_explore_node_uses_custom_focus_and_saves_next_report(
     agent = FakeExploreAgent(
         result={"structured_response": report},
     )
-    node = build_explore_node(agent)
+    received_repo_paths: list[str] = []
+
+    def build_agent(repo_path: str) -> FakeExploreAgent:
+        received_repo_paths.append(repo_path)
+        return agent
+
+    node = build_explore_node(build_agent)
 
     result = node(
         {
@@ -88,6 +98,7 @@ def test_explore_node_uses_custom_focus_and_saves_next_report(
     assert agent.configs == [
         {"recursion_limit": Setting().AGENT_RECURSION_LIMIT}
     ]
+    assert received_repo_paths == [str(tmp_path)]
 
     report_path = tmp_path / "logs" / "explore_r02_s03_i02.json"
     saved = json.loads(report_path.read_text(encoding="utf-8"))
@@ -107,7 +118,7 @@ def test_explore_node_uses_default_focus_when_not_provided(
     agent = FakeExploreAgent(
         result={"structured_response": report},
     )
-    node = build_explore_node(agent)
+    node = build_explore_node(build_agent_factory(agent))
 
     result = node(
         {
@@ -126,7 +137,7 @@ def test_explore_node_uses_default_focus_when_not_provided(
 
 def test_explore_node_rejects_missing_issue(tmp_path: Path) -> None:
     agent = FakeExploreAgent(result={})
-    node = build_explore_node(agent)
+    node = build_explore_node(build_agent_factory(agent))
 
     result = node(
         {
@@ -142,13 +153,35 @@ def test_explore_node_rejects_missing_issue(tmp_path: Path) -> None:
     assert agent.calls == []
 
 
+def test_explore_node_rejects_missing_repo_without_creating_agent(
+    tmp_path: Path,
+) -> None:
+    agent = FakeExploreAgent(result={})
+    factory_calls: list[str] = []
+
+    def build_agent(repo_path: str) -> FakeExploreAgent:
+        factory_calls.append(repo_path)
+        return agent
+
+    result = build_explore_node(build_agent)(
+        {
+            "issue": make_issue(),
+            "run_dir": str(tmp_path),
+        }
+    )
+
+    assert result["explore_failures"][0].type == "INTERNAL"
+    assert "State 中缺少 repo_path" in result["explore_failures"][0].message
+    assert factory_calls == []
+
+
 def test_explore_node_rejects_invalid_structured_response(
     tmp_path: Path,
 ) -> None:
     agent = FakeExploreAgent(
         result={"structured_response": {"focus": "定位异常"}},
     )
-    node = build_explore_node(agent)
+    node = build_explore_node(build_agent_factory(agent))
 
     result = node(
         {
@@ -165,7 +198,7 @@ def test_explore_node_rejects_invalid_structured_response(
 
 def test_explore_node_returns_agent_error(tmp_path: Path) -> None:
     agent = FakeExploreAgent(error=RuntimeError("模型调用失败"))
-    node = build_explore_node(agent)
+    node = build_explore_node(build_agent_factory(agent))
 
     result = node(
         {
@@ -187,7 +220,7 @@ def test_explore_node_classifies_recursion_limit(tmp_path: Path) -> None:
             f"Recursion limit of {recursion_limit} reached"
         )
     )
-    node = build_explore_node(agent)
+    node = build_explore_node(build_agent_factory(agent))
 
     result = node(
         {
@@ -211,7 +244,7 @@ def test_explore_node_uses_send_coordinates(tmp_path: Path) -> None:
     agent = FakeExploreAgent(
         result={"structured_response": report},
     )
-    node = build_explore_node(agent)
+    node = build_explore_node(build_agent_factory(agent))
 
     result = node(
         {
@@ -237,7 +270,7 @@ def test_send_branches_write_unique_report_files(tmp_path: Path) -> None:
     agent = FakeExploreAgent(
         result={"structured_response": report},
     )
-    explore_node = build_explore_node(agent)
+    explore_node = build_explore_node(build_agent_factory(agent))
 
     def coordinator_node(state: dict) -> dict:
         if not state.get("explore_reports"):

@@ -27,6 +27,10 @@ class FakeReviewAgent:
         return self.response
 
 
+def build_agent_factory(agent: FakeReviewAgent):
+    return lambda repo_path, base_commit: agent
+
+
 def make_state(run_dir: Path) -> dict:
     return {
         "run_id": "run_test",
@@ -70,8 +74,13 @@ def test_review_node_saves_round_result_and_enters_test(
         remaining_risks=[],
     )
     agent = FakeReviewAgent({"structured_response": review_result})
+    received_contexts: list[tuple[str, str]] = []
 
-    result = build_review_node(agent)(make_state(tmp_path))
+    def build_agent(repo_path: str, base_commit: str) -> FakeReviewAgent:
+        received_contexts.append((repo_path, base_commit))
+        return agent
+
+    result = build_review_node(build_agent)(make_state(tmp_path))
 
     assert result["phase"] == "TEST"
     assert result["review_result"] == review_result
@@ -81,7 +90,8 @@ def test_review_node_saves_round_result_and_enters_test(
         )
     )
     assert artifact["payload"] == review_result.model_dump()
-    assert "abc123" in agent.calls[0]["messages"][0]["content"]
+    assert received_contexts == [("C:/repo", "abc123")]
+    assert "abc123" not in agent.calls[0]["messages"][0]["content"]
     assert agent.configs == [
         {"recursion_limit": Setting().AGENT_RECURSION_LIMIT}
     ]
@@ -98,7 +108,7 @@ def test_review_node_failure_logs_failure(
     tmp_path: Path,
     agent: FakeReviewAgent,
 ) -> None:
-    result = build_review_node(agent)(make_state(tmp_path))
+    result = build_review_node(build_agent_factory(agent))(make_state(tmp_path))
 
     assert result["status"] == "FAILED"
     assert result["phase"] == "REVIEW"
@@ -120,7 +130,7 @@ def test_review_node_classifies_recursion_limit(tmp_path: Path) -> None:
         )
     )
 
-    result = build_review_node(agent)(make_state(tmp_path))
+    result = build_review_node(build_agent_factory(agent))(make_state(tmp_path))
 
     assert result["failure"].type == "LIMIT"
     assert (

@@ -1,7 +1,9 @@
 from langchain.agents.structured_output import ToolStrategy
 
 from agents import explorer
+from prompts.explorer import build_explore_input
 from schemas.explore_report import ExploreReport
+from schemas.issue_specification import IssueSpec
 
 
 def test_build_explore_agent_uses_tool_strategy(monkeypatch) -> None:
@@ -25,7 +27,7 @@ def test_build_explore_agent_uses_tool_strategy(monkeypatch) -> None:
     )
     model = object()
 
-    result = explorer.build_explore_agent(model)
+    result = explorer.build_explore_agent(model, "C:/repo")
 
     assert result is expected_agent
     assert captured["retry"] == (
@@ -34,14 +36,19 @@ def test_build_explore_agent_uses_tool_strategy(monkeypatch) -> None:
         "Explore Agent",
     )
     assert captured["model"] is model
-    assert captured["tools"] == [
-        explorer.list_files,
-        explorer.read_file,
-        explorer.search_text,
-        explorer.search_symbol,
-        explorer.git_log,
-        explorer.git_show,
-    ]
+    tools = {item.name: item for item in captured["tools"]}
+    assert set(tools) == {
+        "list_files",
+        "read_file",
+        "search_text",
+        "search_symbol",
+        "git_log",
+        "git_show",
+    }
+    assert all(
+        "repo_path" not in item.args_schema.model_fields
+        for item in tools.values()
+    )
     response_format = captured["response_format"]
     assert isinstance(response_format, ToolStrategy)
     assert response_format.schema is ExploreReport
@@ -52,6 +59,7 @@ def test_build_explore_agent_uses_tool_strategy(monkeypatch) -> None:
     assert "不可信数据" in captured["system_prompt"]
     assert "忽略或覆盖系统规则" in captured["system_prompt"]
     assert "不无目的遍历整个仓库" in captured["system_prompt"]
+    assert "工具已固定在当前仓库" in captured["system_prompt"]
     assert "path:line" in captured["system_prompt"]
     assert "禁止根据命名习惯虚构" in captured["system_prompt"]
     assert "只记录经过工具验证的现有" in captured["system_prompt"]
@@ -61,3 +69,33 @@ def test_build_explore_agent_uses_tool_strategy(monkeypatch) -> None:
     assert "经工具验证的现有测试" in (
         ExploreReport.model_fields["test_targets"].description
     )
+
+
+def test_explore_tools_bind_repo_path(monkeypatch) -> None:
+    captured: list[dict] = []
+    monkeypatch.setattr(
+        explorer.git_log,
+        "func",
+        lambda **payload: captured.append(payload) or "history",
+    )
+    tools = {item.name: item for item in explorer.build_explore_tools("C:/repo")}
+
+    assert tools["git_log"].invoke({"path": "src", "limit": 2}) == "history"
+    assert captured == [
+        {
+            "repo_path": "C:/repo",
+            "path": "src",
+            "limit": 2,
+        }
+    ]
+
+
+def test_explore_input_uses_bound_repo_context() -> None:
+    content = build_explore_input(
+        issue=IssueSpec(title="查询失败", body="应返回空列表"),
+        focus="定位查询逻辑",
+        current_summary="等待探索",
+    )
+
+    assert "所有工具已固定在当前仓库" in content
+    assert "repo_path" not in content

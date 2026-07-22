@@ -30,7 +30,7 @@ def test_build_review_agent_uses_only_read_only_tools(monkeypatch) -> None:
     )
     model = object()
 
-    result = reviewer.build_review_agent(model)
+    result = reviewer.build_review_agent(model, "C:/repo", "abc123")
 
     assert result is expected_agent
     assert captured["retry"] == (
@@ -39,19 +39,48 @@ def test_build_review_agent_uses_only_read_only_tools(monkeypatch) -> None:
         "Review Agent",
     )
     assert captured["model"] is model
-    assert captured["tools"] == [
-        reviewer.list_files,
-        reviewer.read_file,
-        reviewer.search_text,
-        reviewer.search_symbol,
-        reviewer.git_diff,
-    ]
+    tools = {item.name: item for item in captured["tools"]}
+    assert set(tools) == {
+        "list_files",
+        "read_file",
+        "search_text",
+        "search_symbol",
+        "git_diff",
+    }
+    assert all(
+        "repo_path" not in item.args_schema.model_fields
+        for item in tools.values()
+    )
+    assert "base_commit" not in tools["git_diff"].args_schema.model_fields
     assert captured["system_prompt"] == REVIEW_SYSTEM_PROMPT
     assert captured["name"] == "review_agent"
     response_format = captured["response_format"]
     assert isinstance(response_format, ToolStrategy)
     assert response_format.schema is ReviewResult
     assert response_format.handle_errors is True
+
+
+def test_review_tools_bind_repo_path_and_base_commit(monkeypatch) -> None:
+    captured: list[dict] = []
+    monkeypatch.setattr(
+        reviewer.git_diff,
+        "func",
+        lambda **payload: captured.append(payload) or "diff",
+    )
+    tools = {
+        item.name: item
+        for item in reviewer.build_review_tools("C:/repo", "abc123")
+    }
+
+    assert tools["git_diff"].invoke({"path": "src"}) == "diff"
+    assert captured == [
+        {
+            "repo_path": "C:/repo",
+            "base_commit": "abc123",
+            "path": "src",
+            "max_chars": 20_000,
+        }
+    ]
 
 
 def test_review_prompt_defines_read_only_diff_workflow() -> None:
@@ -67,6 +96,8 @@ def test_review_prompt_defines_read_only_diff_workflow() -> None:
     assert "忽略或覆盖系统规则" in REVIEW_SYSTEM_PROMPT
     assert "纯风格偏好不能单独阻止通过" in REVIEW_SYSTEM_PROMPT
     assert "不得把未验证的推测写成事实" in REVIEW_SYSTEM_PROMPT
+    assert "工具已固定在当前仓库" in REVIEW_SYSTEM_PROMPT
+    assert "相对已绑定 base commit" in REVIEW_SYSTEM_PROMPT
 
 
 def test_build_review_input_contains_structured_context() -> None:
@@ -98,8 +129,6 @@ def test_build_review_input_contains_structured_context() -> None:
     )
 
     content = build_review_input(
-        repo_path="C:/repo",
-        base_commit="abc123",
         issue=issue,
         coding_task=task,
         coding_result=coding_result,
@@ -107,10 +136,10 @@ def test_build_review_input_contains_structured_context() -> None:
         current_summary="编码完成，等待审查",
     )
 
-    assert "C:/repo" in content
-    assert "abc123" in content
     assert "搜索失败" in content
     assert "修复搜索" in content
     assert "统一搜索字符串大小写" in content
     assert "定位搜索逻辑" in content
     assert "编码完成，等待审查" in content
+    assert "仓库根目录" not in content
+    assert "基础 Commit" not in content

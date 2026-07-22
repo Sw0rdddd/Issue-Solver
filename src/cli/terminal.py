@@ -431,7 +431,11 @@ class TerminalReporter:
         all_passed = results and all(item.status == "PASSED" for item in results)
         marker = "✓" if all_passed else "✗"
         self._progress(f"  {marker} Test 完成 · {elapsed:.2f} 秒")
-        self.start_timing("coordinator")
+        self.start_timing(
+            "finalize"
+            if update.get("next_action") == "FINISH"
+            else "coordinator"
+        )
 
     def _handle_finalize(self, update: dict[str, Any]) -> None:
         elapsed = self._duration("finalize")

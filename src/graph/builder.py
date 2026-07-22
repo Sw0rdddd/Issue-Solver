@@ -4,7 +4,11 @@ from langgraph.graph import END, START, StateGraph
 from agents.coordinator import build_coordinator_agent
 from agents.explorer import build_explore_agent
 from agents.reviewer import build_review_agent
-from graph.routing import route_after_coordinator, route_after_step
+from graph.routing import (
+    route_after_coordinator,
+    route_after_step,
+    route_after_test,
+)
 from graph.state import ResolverState
 from nodes.coding import build_coding_node
 from nodes.coordinator import build_coordinator_node
@@ -24,11 +28,17 @@ def build_graph(model: BaseChatModel) -> StateGraph:
     parse_issue_node = build_parse_issue_node(model)
     coordinator_agent = build_coordinator_agent(model)
     coordinator_node = build_coordinator_node(coordinator_agent)
-    explore_agent = build_explore_agent(model)
-    explore_node = build_explore_node(explore_agent)
+    explore_node = build_explore_node(
+        lambda repo_path: build_explore_agent(model, repo_path)
+    )
     coding_node = build_coding_node(model)
-    review_agent = build_review_agent(model)
-    review_node = build_review_node(review_agent)
+    review_node = build_review_node(
+        lambda repo_path, base_commit: build_review_agent(
+            model,
+            repo_path,
+            base_commit,
+        )
+    )
     test_node = build_test_node()
     finalize_node = build_finalize_node()
 
@@ -86,9 +96,10 @@ def build_graph(model: BaseChatModel) -> StateGraph:
     )
     builder.add_conditional_edges(
         "test",
-        route_after_step,
+        route_after_test,
         {
-            "CONTINUE": "coordinator",
+            "COORDINATOR": "coordinator",
+            "FINALIZE": "finalize",
             "FAILED": END,
         },
     )
