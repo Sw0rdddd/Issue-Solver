@@ -46,7 +46,7 @@
       <td nowrap align="right">90.00%</td>
       <td nowrap align="right">405.66 秒</td>
       <td nowrap align="right">1.20</td>
-      <td nowrap align="right">761,799.50</td>
+      <td nowrap align="right">761,799</td>
       <td nowrap align="right">90.75%</td>
     </tr>
   </tbody>
@@ -129,5 +129,5 @@ uv run pytest -q --cov=src --cov-report=term-missing --cov-fail-under=80
 - [项目架构与设计说明](docs/project-overview.md)
 - [完整运行流程图](docs/workflow.md)
 - [评测集与验收约定](evaluation/benchmark.md)
-- [15 项测评结果报告](evaluation/results.md)
+- [10 项测评结果报告](evaluation/results.md)
 - [评测测试源码说明](evaluation/tests.md)
