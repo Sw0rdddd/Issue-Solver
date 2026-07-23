@@ -2,9 +2,9 @@
 
 > **状态声明：** 表中问题当前可能已经修复、关闭、重新打开或内容发生变化。评测仅以固定的修复前基线和附带回归测试为准，不代表 GitHub 问题的当前状态。
 
-本评测集选取真实开源项目的 GitHub Issue，包含 10 个普通案例和 5 个困难案例。完整结果见 [results.md](results.md)，测试源码见 [tests.md](tests.md)。
+本评测集选取 10 个真实开源项目的 GitHub Issue。完整结果见 [results.md](results.md)，测试源码见 [tests.md](tests.md)。
 
-测评时间：**2026-07-21**。
+最近一次测评运行时间：**2026-07-22 至 2026-07-23**。
 
 ## 使用约定
 
@@ -12,7 +12,7 @@
 - `基线` 的原有测试应通过；在基线之上加入问题测试后，该测试应失败。
 - 问题修复后，新增测试与原有测试均应通过，不得删除、跳过或弱化断言。
 
-## 普通案例
+## 评测案例
 
 | 问题 | 基线 | 测试文件 | 评测点 |
 |---|---|---|---|
@@ -26,14 +26,3 @@
 | [pytest-rerunfailures #270](https://github.com/pytest-dev/pytest-rerunfailures/issues/270) | `5ef1dd0` | `tests/test_issue_270.py` | 清理阶段异常参与重跑排除判断 |
 | [more-itertools #1204](https://github.com/more-itertools/more-itertools/issues/1204) | `64be96c` | `tests/test_issue_1204.py` | 新增惰性 `duplicates` API |
 | [humanize #214](https://github.com/python-humanize/humanize/issues/214) | `073a00b` | `tests/test_issue_214.py` | `natural_list` 支持 “or” |
-
-
-## 困难案例
-
-| 问题 | 基线 | 测试文件 | 评测点 |
-|---|---|---|---|
-| [Rich #3299](https://github.com/Textualize/rich/issues/3299) | `7912306` | `tests/test_issue_3299.py` | 混合宽度字符切分 |
-| [Click #2614](https://github.com/pallets/click/issues/2614) | `333c28d` | `tests/test_issue_2614.py` | 补全时不执行可调用默认值 |
-| [Werkzeug #3156](https://github.com/pallets/werkzeug/issues/3156) | `1b00618` | `tests/test_issue_3156.py` | 路由状态机保持稳定优先级 |
-| [Pluggy #681](https://github.com/pytest-dev/pluggy/issues/681) | `c1a5f3e` | `testing/test_issue_681.py` | 追踪输出安全处理代理字符 |
-| [Jinja #2069](https://github.com/pallets/jinja/issues/2069) | `5ef7011` | `tests/test_issue_2069.py` | 正确分析分支内声明变量 |

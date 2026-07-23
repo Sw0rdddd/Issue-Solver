@@ -21,38 +21,38 @@
 
 ## 测评结果
 
-评测集选取 15 个真实开源项目的 GitHub Issue，注意并非SWE-bench的成绩，包括 10 个普通案例和 5 个困难案例；系统对每个案例完成一次端到端运行。测评使用 `deepseek-v4-flash`，时间为 2026-07-21。
+评测集选取 10 个真实开源项目的 GitHub Issue，注意并非 SWE-bench 的成绩；系统对每个案例完成一次端到端运行。测评使用 `deepseek-v4-pro`，时间为 2026-07-22 至 2026-07-23。
 
 <table>
   <thead>
     <tr>
       <th nowrap align="right">Issue 数</th>
       <th nowrap align="right">成功修复</th>
-      <th nowrap align="right">总成功率</th>
-      <th nowrap align="right">普通成功率</th>
-      <th nowrap align="right">困难成功率</th>
+      <th nowrap align="right">成功率</th>
       <th nowrap align="right">Patch 生成率</th>
       <th nowrap align="right">测试通过率</th>
       <th nowrap align="right">平均耗时</th>
       <th nowrap align="right">平均轮次</th>
+      <th nowrap align="right">平均 Token</th>
+      <th nowrap align="right">缓存读取占输入</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td nowrap align="right">15</td>
-      <td nowrap align="right">13</td>
-      <td nowrap align="right">86.67%</td>
-      <td nowrap align="right">100.00%</td>
-      <td nowrap align="right">60.00%</td>
-      <td nowrap align="right">86.67%</td>
-      <td nowrap align="right">86.67%</td>
-      <td nowrap align="right">411.67 秒</td>
-      <td nowrap align="right">1.33</td>
+      <td nowrap align="right">10</td>
+      <td nowrap align="right">9</td>
+      <td nowrap align="right">90.00%</td>
+      <td nowrap align="right">90.00%</td>
+      <td nowrap align="right">90.00%</td>
+      <td nowrap align="right">405.66 秒</td>
+      <td nowrap align="right">1.20</td>
+      <td nowrap align="right">761,799.50</td>
+      <td nowrap align="right">90.75%</td>
     </tr>
   </tbody>
 </table>
 
-测试通过率按全部 Issue 计算：只有定向测试和全量回归均通过才计为通过。普通案例成功率为 100.00%，困难案例成功率为 60.00%。完整口径、逐项数据和失败分析见[测评结果报告](evaluation/results.md)，评测基线与测试说明见[评测集](evaluation/benchmark.md)。
+测试通过率按全部 Issue 计算：只有定向测试和全量回归均通过才计为通过。本轮采用推理模型，405.66 秒为包含模型推理、工具调查与真实 pytest 的端到端耗时，并非单次模型生成延迟。缓存读取占输入 Token 的 90.75%，可视为 Token 口径的缓存命中率，不是按请求数量计算。完整口径、逐项数据和失败分析见[测评结果报告](evaluation/results.md)，评测基线与测试说明见[评测集](evaluation/benchmark.md)。
 
 > 案例均来自真实 GitHub Issue。相关 Issue 当前可能已经修复、关闭、重新打开或发生变化；结果仅对应固定修复前基线和附带回归测试。
 
