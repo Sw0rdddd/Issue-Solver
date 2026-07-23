@@ -56,8 +56,8 @@ def make_state(git_repo: Path, run_dir: Path) -> dict:
                 focus="定位文件",
                 relevant_files=["tracked.txt"],
                 relevant_symbols=[],
-                findings=["内容仍为 initial"],
-                root_cause="原始内容不正确",
+                findings=["tracked.txt:1 内容仍为 initial"],
+                root_cause="tracked.txt:1 原始内容不正确",
                 test_targets=[],
                 unknowns=[],
             )

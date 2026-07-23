@@ -21,11 +21,17 @@ class ReviewResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     verdict: Literal["APPROVE", "REQUEST_CHANGES"] = Field(
-        description="审查结论",
+        description="审查结论：APPROVE 仅在不存在阻断问题时使用；否则为 REQUEST_CHANGES。",
     )
-    issues: list[NonEmptyText] = Field(description="阻止当前修改通过的具体问题")
-    suggestions: list[NonEmptyText] = Field(description="建议的修复方式或非阻断改进")
-    remaining_risks: list[NonEmptyText] = Field(description="即使通过仍可能存在的风险")
+    issues: list[NonEmptyText] = Field(
+        description="阻止当前修改通过的具体、可验证问题；APPROVE 时必须为空。"
+    )
+    suggestions: list[NonEmptyText] = Field(
+        description="不阻断当前结论的改进建议或可能的修复方向。"
+    )
+    remaining_risks: list[NonEmptyText] = Field(
+        description="即使 APPROVE 后仍无法完全排除的具体风险。"
+    )
 
     @model_validator(mode="after")
     def validate_verdict_matches_issues(self) -> "ReviewResult":

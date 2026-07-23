@@ -6,7 +6,9 @@ from pydantic import ValidationError
 from graph.state import NextAction, Phase, ResolverState, RunStatus
 from schemas.coding_result import CodingResult
 from schemas.coding_task import CodingTask
+from schemas.coordinator_decision import CoordinatorDecision
 from schemas.evidence_digest import EvidenceDigest
+from schemas.environment_info import EnvironmentInfo
 from schemas.explore_execution import ExploreExecution
 from schemas.explore_report import ExploreReport
 from schemas.failure import FailureInfo, make_failure
@@ -23,6 +25,31 @@ def test_issue_spec_defaults_and_json_serialization() -> None:
     assert issue.actual_behavior == ""
     assert issue.acceptance_criteria == []
     assert "空结果异常" in issue.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        IssueSpec,
+        ExploreExecution,
+        ExploreReport,
+        EvidenceDigest,
+        RepositoryProfile,
+        CodingTask,
+        CodingResult,
+        CoordinatorDecision,
+        ReviewResult,
+        ExecutionResult,
+        EnvironmentInfo,
+        FailureInfo,
+    ],
+)
+def test_public_schema_describes_every_field(model: type) -> None:
+    properties = model.model_json_schema()["properties"]
+
+    assert all(
+        details.get("description") for details in properties.values()
+    )
 
 
 @pytest.mark.parametrize(
@@ -47,8 +74,8 @@ def test_issue_spec_defaults_and_json_serialization() -> None:
                 "focus": "定位异常",
                 "relevant_files": ["app.py"],
                 "relevant_symbols": ["handle_request"],
-                "findings": ["空值未经处理"],
-                "root_cause": "直接遍历 None",
+                "findings": ["app.py:8 空值未经处理"],
+                "root_cause": "app.py:8 直接遍历 None",
                 "test_targets": ["test_app.py"],
                 "unknowns": [],
             },
@@ -316,6 +343,51 @@ def test_coding_task_normalizes_pytest_node_ids() -> None:
     )
 
     assert task.test_targets == ["tests/test_app.py::TestQuery::test_empty"]
+
+
+def test_explore_report_normalizes_paths_and_pytest_node_ids() -> None:
+    report = ExploreReport(
+        focus="定位空值处理",
+        relevant_files=["src\\query.py"],
+        relevant_symbols=["load_query"],
+        findings=["src/query.py:8 空值未经处理"],
+        root_cause="src/query.py:8 直接遍历空值",
+        test_targets=["tests\\test_query.py::test_empty"],
+        unknowns=[],
+    )
+
+    assert report.relevant_files == ["src/query.py"]
+    assert report.test_targets == ["tests/test_query.py::test_empty"]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"relevant_files": ["../src/query.py"]},
+        {"findings": ["空值未经处理"]},
+        {"root_cause": "直接遍历空值"},
+        {"test_targets": ["pytest -q tests/test_query.py"]},
+        {},
+    ],
+)
+def test_explore_report_rejects_unverifiable_or_empty_content(
+    payload: dict[str, object],
+) -> None:
+    base_payload: dict[str, object] = {
+        "focus": "定位空值处理",
+        "relevant_files": [],
+        "relevant_symbols": [],
+        "findings": [],
+        "root_cause": "",
+        "test_targets": [],
+        "unknowns": ["尚未读取相关源码"],
+    }
+    base_payload.update(payload)
+    if not payload:
+        base_payload["unknowns"] = []
+
+    with pytest.raises(ValidationError):
+        ExploreReport.model_validate(base_payload)
 
 
 @pytest.mark.parametrize(

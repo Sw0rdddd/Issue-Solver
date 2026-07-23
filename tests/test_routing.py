@@ -20,7 +20,7 @@ def make_report() -> ExploreReport:
         findings=[],
         root_cause="",
         test_targets=[],
-        unknowns=[],
+        unknowns=["尚未确认根因"],
     )
 
 

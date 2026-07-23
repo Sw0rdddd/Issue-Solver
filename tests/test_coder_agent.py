@@ -99,6 +99,12 @@ def test_coding_prompt_defines_safe_iterative_workflow() -> None:
     assert "ENVIRONMENT、LIMIT 或 INTERNAL 应停止无意义重试" in (
         CODING_SYSTEM_PROMPT
     )
+    assert "Few-shot" in CODING_SYSTEM_PROMPT
+    assert "inspect_changes 确认累计 Diff 只包含该文件" in (
+        CODING_SYSTEM_PROMPT
+    )
+    assert "尚未运行测试；由后续 Test node 验证" in CODING_SYSTEM_PROMPT
+    assert "绝不可照抄" in CODING_SYSTEM_PROMPT
     assert "不代表 Review 或测试通过" in (
         CodingResult.model_fields["success"].description
     )

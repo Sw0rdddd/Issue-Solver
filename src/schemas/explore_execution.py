@@ -22,14 +22,39 @@ class ExploreExecution(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    repair_round: int = Field(strict=True, ge=1)
-    stage_call: int = Field(strict=True, ge=1)
-    item_index: int = Field(strict=True, ge=1)
-    focus: NonEmptyText
-    title: NonEmptyText | None = None
-    status: Literal["PASSED", "FAILED"]
-    duration: float = Field(strict=True, ge=0, allow_inf_nan=False)
-    failure: FailureInfo | None = None
+    repair_round: int = Field(
+        strict=True,
+        ge=1,
+        description="该 Explore 分支所属的修复轮次。",
+    )
+    stage_call: int = Field(
+        strict=True,
+        ge=1,
+        description="同一修复轮内的第几批 Explore 调用。",
+    )
+    item_index: int = Field(
+        strict=True,
+        ge=1,
+        description="当前并行 Explore 任务在本批中的一基索引。",
+    )
+    focus: NonEmptyText = Field(description="本分支实际执行的调查目标。")
+    title: NonEmptyText | None = Field(
+        default=None,
+        description="供终端展示的简洁调查标题。",
+    )
+    status: Literal["PASSED", "FAILED"] = Field(
+        description="该 Explore 分支的确定性执行状态。"
+    )
+    duration: float = Field(
+        strict=True,
+        ge=0,
+        allow_inf_nan=False,
+        description="该分支从开始到结束的耗时，单位为秒。",
+    )
+    failure: FailureInfo | None = Field(
+        default=None,
+        description="仅 status=FAILED 时提供的结构化失败事实。",
+    )
 
     @model_validator(mode="after")
     def validate_failure_matches_status(self) -> "ExploreExecution":

@@ -219,7 +219,7 @@ def test_compiled_graph_fans_out_and_joins_explore_nodes(
                     findings=[],
                     root_cause="",
                     test_targets=[],
-                    unknowns=[],
+                    unknowns=["尚未确认根因"],
                 )
             ]
         }
@@ -397,7 +397,7 @@ def test_compiled_graph_runs_review_test_and_finalize_without_coordinator(
                     relevant_files=["app.py"],
                     relevant_symbols=[],
                     findings=[],
-                    root_cause="缺少空值处理",
+                    root_cause="app.py:8 缺少空值处理",
                     test_targets=[],
                     unknowns=[],
                 )

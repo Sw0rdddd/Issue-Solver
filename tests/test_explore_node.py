@@ -52,8 +52,8 @@ def make_report(focus: str) -> ExploreReport:
         focus=focus,
         relevant_files=["app.py"],
         relevant_symbols=["handle_request"],
-        findings=["返回值可能为 None"],
-        root_cause="直接遍历了 None",
+        findings=["app.py:8 返回值可能为 None"],
+        root_cause="app.py:8 直接遍历了 None",
         test_targets=["tests/test_app.py"],
         unknowns=[],
     )

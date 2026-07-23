@@ -39,7 +39,9 @@ class TestResult(BaseModel):
         "ENVIRONMENT_ERROR",
         "TIMEOUT",
         "SAFETY_ERROR",
-    ]
+    ] = Field(
+        description="测试结论；只有 PASSED 表示该命令通过，其余状态均阻止 FINISH。"
+    )
     exit_code: int = Field(strict=True, description="测试进程退出码")
     duration: float = Field(
         strict=True,
@@ -52,7 +54,10 @@ class TestResult(BaseModel):
     output_tail: OutputTail = Field(
         description="受限测试日志尾部；仅失败结果传给 Coordinator"
     )
-    failure: FailureInfo | None = None
+    failure: FailureInfo | None = Field(
+        default=None,
+        description="非 PASSED 时必须提供、且与 status 对应的结构化失败事实。",
+    )
 
     @model_validator(mode="after")
     def validate_status_matches_exit_code(self) -> "TestResult":

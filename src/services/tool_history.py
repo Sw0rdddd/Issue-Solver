@@ -41,10 +41,12 @@ def _completed_tool_batches(
 
 
 class ToolHistoryWindowMiddleware(AgentMiddleware):
-    """在模型调用前清除超出窗口的已完成工具调用记录。"""
+    """仅清除超出窗口的已完成工具调用批次，保留系统提示词和上游任务。"""
 
     def __init__(self, recursion_limit: int) -> None:
-        self.retained_batches = max(1, recursion_limit // 4)
+        """保留约四分之三的工具调用预算，且不截断完整批次。"""
+
+        self.retained_batches = max(1, (recursion_limit * 3 + 3) // 4)
 
     def before_model(
         self,

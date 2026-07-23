@@ -403,7 +403,12 @@ def test_run_streams_graph_with_initial_state_and_progress(
         setting.REASONING_HISTORY
     )
     compiled_graph.with_config.assert_called_once_with(
-        {"recursion_limit": 75}
+        {
+            "recursion_limit": run_module._workflow_recursion_limit(
+                5,
+                setting.MAX_EXPLORE_BATCHES,
+            )
+        }
     )
     compiled_graph.invoke.assert_not_called()
 

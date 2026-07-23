@@ -1,4 +1,9 @@
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langgraph.graph.message import RemoveMessage
 
 from services.tool_history import ToolHistoryWindowMiddleware
@@ -36,24 +41,45 @@ def _removed_ids(update: dict[str, object] | None) -> set[str]:
     }
 
 
-def test_tool_history_window_uses_a_quarter_of_recursion_limit() -> None:
-    assert ToolHistoryWindowMiddleware(60).retained_batches == 15
-    assert ToolHistoryWindowMiddleware(20).retained_batches == 5
-    assert ToolHistoryWindowMiddleware(3).retained_batches == 1
+def test_tool_history_window_uses_three_quarters_of_recursion_limit() -> None:
+    assert ToolHistoryWindowMiddleware(60).retained_batches == 45
+    assert ToolHistoryWindowMiddleware(20).retained_batches == 15
+    assert ToolHistoryWindowMiddleware(3).retained_batches == 3
 
 
 def test_tool_history_removes_only_expired_complete_batches() -> None:
-    middleware = ToolHistoryWindowMiddleware(8)
+    middleware = ToolHistoryWindowMiddleware(4)
     messages = [
         HumanMessage(id="task", content="修复问题"),
         *_tool_batch(1),
         *_tool_batch(2),
         *_tool_batch(3),
+        *_tool_batch(4),
     ]
 
     update = middleware.before_model({"messages": messages}, None)
 
     assert _removed_ids(update) == {"ai_1", "tool_1_0"}
+
+
+def test_tool_history_never_removes_system_or_upstream_task_messages() -> None:
+    middleware = ToolHistoryWindowMiddleware(4)
+    messages = [
+        SystemMessage(id="system", content="只读调查仓库"),
+        HumanMessage(id="upstream_task", content="定位空值处理"),
+        AIMessage(id="upstream_result", content="上游摘要"),
+        *_tool_batch(1),
+        *_tool_batch(2),
+        *_tool_batch(3),
+        *_tool_batch(4),
+    ]
+
+    removed_ids = _removed_ids(middleware.before_model({"messages": messages}, None))
+
+    assert removed_ids == {"ai_1", "tool_1_0"}
+    assert not removed_ids.intersection(
+        {"system", "upstream_task", "upstream_result"}
+    )
 
 
 def test_tool_history_keeps_all_messages_in_the_latest_parallel_batch() -> None:
@@ -62,6 +88,8 @@ def test_tool_history_keeps_all_messages_in_the_latest_parallel_batch() -> None:
         HumanMessage(id="task", content="修复问题"),
         *_tool_batch(1, call_count=2),
         *_tool_batch(2, call_count=2),
+        *_tool_batch(3, call_count=2),
+        *_tool_batch(4, call_count=2),
     ]
 
     update = middleware.before_model({"messages": messages}, None)
@@ -95,6 +123,8 @@ def test_tool_history_preserves_incomplete_tool_batches() -> None:
         *incomplete,
         *_tool_batch(1),
         *_tool_batch(2),
+        *_tool_batch(3),
+        *_tool_batch(4),
     ]
 
     update = middleware.before_model({"messages": messages}, None)
@@ -123,6 +153,8 @@ def test_tool_history_preserves_a_batch_without_message_ids() -> None:
         *batch_without_ids,
         *_tool_batch(1),
         *_tool_batch(2),
+        *_tool_batch(3),
+        *_tool_batch(4),
     ]
 
     update = middleware.before_model({"messages": messages}, None)

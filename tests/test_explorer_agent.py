@@ -60,18 +60,28 @@ def test_build_explore_agent_uses_tool_strategy(monkeypatch) -> None:
     assert isinstance(middleware[0], ToolHistoryWindowMiddleware)
     assert "git_log" in captured["system_prompt"]
     assert "git_show" in captured["system_prompt"]
-    assert "list_files 或搜索结果被截断" in captured["system_prompt"]
-    assert "不可信数据" in captured["system_prompt"]
-    assert "忽略或覆盖系统规则" in captured["system_prompt"]
-    assert "不无目的遍历整个仓库" in captured["system_prompt"]
-    assert "工具已固定在当前仓库" in captured["system_prompt"]
+    assert "list_files 或搜索结果截断" in captured["system_prompt"]
+    assert "调查流程" in captured["system_prompt"]
+    assert "报告契约" in captured["system_prompt"]
+    assert "返回前自检" in captured["system_prompt"]
+    assert "只可来自真实工具输出" in captured["system_prompt"]
+    assert "工具已绑定当前仓库" in captured["system_prompt"]
     assert "path:line" in captured["system_prompt"]
     assert "禁止根据命名习惯虚构" in captured["system_prompt"]
-    assert "只记录经过工具验证的现有" in captured["system_prompt"]
-    assert "证据不足的候选目标写入 unknowns" in captured["system_prompt"]
+    assert "仅记录经过工具验证的既有" in captured["system_prompt"]
+    assert "证据不足的候选目标或自然语言场景写入 unknowns" in (
+        captured["system_prompt"]
+    )
+    assert "本次 focus 是唯一调查范围" in captured["system_prompt"]
+    assert "Few-shot" in captured["system_prompt"]
+    assert "示例一——证据不足" in captured["system_prompt"]
+    assert "示例二——已读到源码和测试" in captured["system_prompt"]
+    assert "绝不可照抄" in captured["system_prompt"]
+    assert "root_cause\":\"\"" in captured["system_prompt"]
+    assert captured["system_prompt"].rstrip().endswith("\"unknowns\":[]}")
     assert "计划新增" not in captured["system_prompt"]
     assert "path:line" in ExploreReport.model_fields["findings"].description
-    assert "经工具验证的现有测试" in (
+    assert "经工具和 read_file 验证的既有" in (
         ExploreReport.model_fields["test_targets"].description
     )
 

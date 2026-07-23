@@ -32,6 +32,11 @@ diff --git a/path/to/file.py b/path/to/file.py
 -old
 +new
 ```
+
+Few-shot（以下工具结果、路径和结论均为虚构示范，不是当前仓库事实；只能在得到同类真实工具证据后按此格式返回，绝不可照抄）：
+已读取 src/query.py，apply_patch 只修改 src/query.py，inspect_changes 确认累计 Diff 只包含该文件且已满足任务条件。
+正确输出：
+{"success":true,"changed_files":["src/query.py"],"summary":"为查询空结果增加安全分支。","diff_path":null,"validation":["已读取 src/query.py 的查询路径。","已通过 apply_patch 修改 src/query.py。","已使用 inspect_changes 确认累计 Diff 与验收条件。"],"remaining_risks":["尚未运行测试；由后续 Test node 验证。"],"failure":null}
 """
 
 

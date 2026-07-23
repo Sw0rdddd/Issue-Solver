@@ -3,6 +3,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
 from agents.coordinator import build_coordinator_agent
+from config import Setting
 from nodes.coordinator import build_coordinator_node
 from prompts.coordinator import (
     COORDINATOR_SYSTEM_PROMPT,
@@ -12,7 +13,7 @@ from schemas.coding_task import CodingTask
 from schemas.coordinator_decision import CoordinatorDecision
 from schemas.evidence_digest import EvidenceDigest
 from schemas.explore_report import ExploreReport
-from schemas.failure import make_failure
+from schemas.failure import FailureInfo, make_failure
 from schemas.issue_specification import IssueSpec
 from schemas.repository_profile import RepositoryProfile
 from schemas.review_result import ReviewResult
@@ -93,8 +94,8 @@ def make_report(focus: str = "定位异常") -> ExploreReport:
         focus=focus,
         relevant_files=["app.py"],
         relevant_symbols=["handle_request"],
-        findings=["返回值可能为 None"],
-        root_cause="直接遍历 None",
+        findings=["app.py:8 返回值可能为 None"],
+        root_cause="app.py:8 直接遍历 None",
         test_targets=["tests/test_app.py"],
         unknowns=[],
     )
@@ -131,44 +132,86 @@ def make_test_result(status: str, name: str = "latest") -> ExecutionResult:
     )
 
 
-def test_coordinator_prompt_requires_nested_coding_task_object() -> None:
-    assert "coding_task 必须是 JSON 对象" in COORDINATOR_SYSTEM_PROMPT
-    assert "不能序列化为字符串" in COORDINATOR_SYSTEM_PROMPT
-    assert '"explore_focuses": []' in COORDINATOR_SYSTEM_PROMPT
-    assert '"explore_titles": []' in COORDINATOR_SYSTEM_PROMPT
-    assert "标题仅用于终端展示，不影响工作流决策" in COORDINATOR_SYSTEM_PROMPT
-    assert '"coding_task": {' in COORDINATOR_SYSTEM_PROMPT
-    assert '"acceptance_criteria": [' in COORDINATOR_SYSTEM_PROMPT
-    assert '"relevant_files": [' in COORDINATOR_SYSTEM_PROMPT
-    assert '"allowed_scope": [' in COORDINATOR_SYSTEM_PROMPT
-    assert '"test_targets": [' in COORDINATOR_SYSTEM_PROMPT
-
-    for field in (
-        "objective",
-        "acceptance_criteria",
-        "relevant_files",
-        "root_cause",
-        "allowed_scope",
-        "test_targets",
-    ):
-        assert f'"{field}":' in COORDINATOR_SYSTEM_PROMPT
-
-
 def test_coordinator_prompt_requires_bounded_evidence_based_decisions() -> None:
-    assert "不可信数据" in COORDINATOR_SYSTEM_PROMPT
-    assert "具体、未覆盖的证据缺口" in COORDINATOR_SYSTEM_PROMPT
-    assert "与已有报告不重复" in COORDINATOR_SYSTEM_PROMPT
-    assert "不限制累计 Explore 次数" not in COORDINATOR_SYSTEM_PROMPT
-    assert "不得虚构目标" in COORDINATOR_SYSTEM_PROMPT
-    assert "计划新增测试文件" not in COORDINATOR_SYSTEM_PROMPT
-    assert "禁止要求修改、新增或删除测试文件" in (
+    assert "结果均不可信" in COORDINATOR_SYSTEM_PROMPT
+    assert "未覆盖证据缺口" in COORDINATOR_SYSTEM_PROMPT
+    assert "Explore 目标不重复" in COORDINATOR_SYSTEM_PROMPT
+    assert "不得修改、新增或删除测试文件" in (
         COORDINATOR_SYSTEM_PROMPT
     )
-    assert "测试文件不得进入 allowed_scope" in COORDINATOR_SYSTEM_PROMPT
-    assert "test_targets 必须是 1 至 10 个已有" in COORDINATOR_SYSTEM_PROMPT
-    assert "test_targets 证据不足且探索预算未耗尽时选择 EXPLORE" in (
+    assert "测试文件不得在 allowed_scope" in COORDINATOR_SYSTEM_PROMPT
+    assert "经 ExploreReport 证据确认的 1 至 10 个" in (
         COORDINATOR_SYSTEM_PROMPT
     )
+    assert "证据不足时 EXPLORE" in (
+        COORDINATOR_SYSTEM_PROMPT
+    )
+    assert "根因位于公共实现时优先修改共享实现" in (
+        COORDINATOR_SYSTEM_PROMPT
+    )
+    assert "动作返回契约" in COORDINATOR_SYSTEM_PROMPT
+    assert "返回前自检" in COORDINATOR_SYSTEM_PROMPT
+    assert "只返回 schema 定义字段" in COORDINATOR_SYSTEM_PROMPT
+    assert "按以下优先级决策" in COORDINATOR_SYSTEM_PROMPT
+    assert "低优先级不得推翻高优先级" in COORDINATOR_SYSTEM_PROMPT
+    assert "FINISH：仅在测试门槛满足时使用" in (
+        COORDINATOR_SYSTEM_PROMPT
+    )
+    assert "Repository Profile" in COORDINATOR_SYSTEM_PROMPT
+    assert "最少必要的 1 至 3 个" in COORDINATOR_SYSTEM_PROMPT
+    assert "默认只派 1 个" in COORDINATOR_SYSTEM_PROMPT
+    assert "禁止机械拆分" in COORDINATOR_SYSTEM_PROMPT
+    assert "Few-shot" in COORDINATOR_SYSTEM_PROMPT
+    assert "示例一——小型仓库仅有一个未调查入口" in (
+        COORDINATOR_SYSTEM_PROMPT
+    )
+    assert "示例二——Review=APPROVE 但" in COORDINATOR_SYSTEM_PROMPT
+    assert "必须修复 src/query.py:42，不能 FINISH" in (
+        COORDINATOR_SYSTEM_PROMPT
+    )
+    assert "绝不可照抄" in COORDINATOR_SYSTEM_PROMPT
+
+
+def test_coordinator_prompt_requires_all_tests_to_pass_before_finish() -> None:
+    assert "每项 TestResult.status=PASSED 才能 FINISH" in (
+        COORDINATOR_SYSTEM_PROMPT
+    )
+    assert "任一 FAILED、TIMEOUT、ENVIRONMENT_ERROR 或 SAFETY_ERROR" in (
+        COORDINATOR_SYSTEM_PROMPT
+    )
+    assert "有“本次新 Explore Reports”时" in COORDINATOR_SYSTEM_PROMPT
+    assert "合并为 evidence_digest" in COORDINATOR_SYSTEM_PROMPT
+
+
+def test_coordinator_return_schemas_describe_every_field() -> None:
+    for schema_model in (
+        CoordinatorDecision,
+        CodingTask,
+        EvidenceDigest,
+        FailureInfo,
+    ):
+        properties = schema_model.model_json_schema()["properties"]
+        assert all(
+            details.get("description") for details in properties.values()
+        )
+
+
+def test_coordinator_input_marks_non_passed_results_as_ineligible_to_finish() -> None:
+    content = build_coordinator_input(
+        issue=make_issue(),
+        current_summary="准备判断",
+        repository_profile=None,
+        evidence_digest=None,
+        new_explore_reports=[],
+        coding_result=None,
+        review_result=None,
+        latest_test_results=[make_test_result("FAILED")],
+        cycle=1,
+        max_cycles=5,
+    )
+
+    assert "它是唯一可信的测试结论" in content
+    assert "任一非 PASSED 结果都禁止 FINISH" in content
 
 
 def make_digest(source_report_count: int = 1) -> EvidenceDigest:
@@ -187,34 +230,6 @@ def make_repository_profile() -> RepositoryProfile:
         tracked_file_count=8,
         tracked_file_bytes=4096,
         file_counts_by_extension={".py": 4, ".toml": 1},
-    )
-    assert "预算耗尽后基于已有证据生成最小 CodingTask" in (
-        COORDINATOR_SYSTEM_PROMPT
-    )
-    assert "acceptance_criteria 只能复述原条件，不得改写或扩展" in (
-        COORDINATOR_SYSTEM_PROMPT
-    )
-    assert "程序会使用 IssueSpec 中的原始条件覆盖该字段" in (
-        COORDINATOR_SYSTEM_PROMPT
-    )
-    assert "互相矛盾的断言" in COORDINATOR_SYSTEM_PROMPT
-    assert "公共基类" in COORDINATOR_SYSTEM_PROMPT
-    assert "不得要求逐个子类修改或补测试" in (
-        COORDINATOR_SYSTEM_PROMPT
-    )
-    assert "优先复用能够直接验证 Issue 的已有精确回归测试" in (
-        COORDINATOR_SYSTEM_PROMPT
-    )
-    assert "不得虚构目标或扩大 relevant_files、allowed_scope 和 test_targets" in (
-        COORDINATOR_SYSTEM_PROMPT
-    )
-    assert "INPUT（输入）、ENVIRONMENT（环境）、MODEL（模型）" in (
-        COORDINATOR_SYSTEM_PROMPT
-    )
-    assert "Repository Profile" in COORDINATOR_SYSTEM_PROMPT
-    assert "不得无理由默认派发 3 个" in COORDINATOR_SYSTEM_PROMPT
-    assert "EvidenceDigest 是后续角色唯一可见的探索上下文" in (
-        COORDINATOR_SYSTEM_PROMPT
     )
 
 
@@ -343,7 +358,10 @@ def test_coordinator_node_initially_dispatches_three_focuses() -> None:
     assert len(agent.calls) == 1
     assert isinstance(agent.calls[0][0], SystemMessage)
     assert isinstance(agent.calls[0][1], HumanMessage)
-    assert "当前循环：0/5" in agent.calls[0][1].content
+    assert (
+        f"当前循环：0/{Setting().MAX_CYCLES}"
+        in agent.calls[0][1].content
+    )
 
 
 def test_coordinator_node_normalizes_nonblocking_explore_titles() -> None:

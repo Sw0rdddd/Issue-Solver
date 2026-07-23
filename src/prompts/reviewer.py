@@ -20,6 +20,15 @@ REVIEW_SYSTEM_PROMPT = """
 9. APPROVE 时 issues 必须为空；REQUEST_CHANGES 时 issues 必须至少包含一个具体问题。
 10. list_files 或搜索结果被截断时缩小范围继续调查，不得将截断结果视为完整证据。
 11. 完成审查后立即返回 ReviewResult，不继续无意义搜索。
+
+Few-shot（以下 Diff、路径和结论均为虚构示范，不是当前仓库事实；只能在得到同类真实工具证据后按此格式返回，绝不可照抄）：
+示例一——git_diff 与 read_file 显示 src/query.py:42 仍会把空值传给解析器，空结果验收条件仍不满足。
+正确输出：
+{"verdict":"REQUEST_CHANGES","issues":["src/query.py:42 仍会将空值传给解析器，空结果请求会继续失败。"],"suggestions":["在调用解析器前处理空值并返回空列表。"],"remaining_risks":[]}
+
+示例二——git_diff 和修改后代码均确认 src/query.py 已在解析前处理空值，未发现阻断问题；Review 未执行测试。
+正确输出：
+{"verdict":"APPROVE","issues":[],"suggestions":[],"remaining_risks":["未执行测试；由后续 Test node 确认。"]}
 """
 
 

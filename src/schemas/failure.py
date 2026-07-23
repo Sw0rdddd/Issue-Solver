@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 
 FailureType = Literal[
@@ -34,9 +34,15 @@ class FailureInfo(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    type: FailureType
-    message: NonEmptyText
-    suggestion: NonEmptyText
+    type: FailureType = Field(
+        description="失败类别，用于决定输入、环境、模型、方案、安全、限制或内部错误的后续处理。"
+    )
+    message: NonEmptyText = Field(
+        description="基于当前证据的具体失败事实，不包含角色指令或未验证推测。"
+    )
+    suggestion: NonEmptyText = Field(
+        description="开发者或后续流程可执行的下一步建议。"
+    )
 
 
 def make_failure(

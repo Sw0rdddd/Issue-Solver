@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 
 EnvironmentKind = Literal["VENV", "CONDA"]
@@ -18,8 +18,18 @@ class EnvironmentInfo(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: EnvironmentKind
-    root_path: NonEmptyText
-    python_executable: NonEmptyText
-    pytest_version: NonEmptyText
-    source: EnvironmentSource
+    kind: EnvironmentKind = Field(
+        description="经预检确认的 Python 环境类型。"
+    )
+    root_path: NonEmptyText = Field(
+        description="经预检确认的目标环境根目录。"
+    )
+    python_executable: NonEmptyText = Field(
+        description="后续测试必须使用的目标环境 Python 可执行文件。"
+    )
+    pytest_version: NonEmptyText = Field(
+        description="在目标环境中实际检测到的 pytest 版本。"
+    )
+    source: EnvironmentSource = Field(
+        description="用于发现该环境的目标仓库目录标记。"
+    )

@@ -101,6 +101,11 @@ def test_review_prompt_defines_read_only_diff_workflow() -> None:
     assert "不得把未验证的推测写成事实" in REVIEW_SYSTEM_PROMPT
     assert "工具已固定在当前仓库" in REVIEW_SYSTEM_PROMPT
     assert "相对已绑定 base commit" in REVIEW_SYSTEM_PROMPT
+    assert "Few-shot" in REVIEW_SYSTEM_PROMPT
+    assert "示例一——git_diff 与 read_file" in REVIEW_SYSTEM_PROMPT
+    assert '"verdict":"REQUEST_CHANGES"' in REVIEW_SYSTEM_PROMPT
+    assert '"verdict":"APPROVE"' in REVIEW_SYSTEM_PROMPT
+    assert "绝不可照抄" in REVIEW_SYSTEM_PROMPT
 
 
 def test_build_review_input_contains_structured_context() -> None:
